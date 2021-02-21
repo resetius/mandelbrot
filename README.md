@@ -9,3 +9,5 @@ Requirements: C compiler, GTK3
 ![mandelbrot](https://github.com/resetius/mandelbrot/blob/master/img/mandelbrot2.png?raw=true)
 
 # julia
+
+![julia](https://github.com/resetius/mandelbrot/blob/master/img/julia.png?raw=true)
