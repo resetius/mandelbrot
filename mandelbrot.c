@@ -1,3 +1,8 @@
+/**
+ * Mandelbrot and Julia sets 
+ * Copyright (c) 2021, Alexey Ozeritskiy
+ */
+
 #include <gtk/gtk.h>
 #include <math.h>
 
@@ -63,7 +68,7 @@ int get_iteration_julia(double x0, double y0, struct App* app) {
     for (i = 1; i<32; i=i+1) {
         xn = x*x - y*y + cx;
         yn = 2*x*y + cy;
-        if (sqrt(xn*xn+yn*yn) > 1e4) {
+        if (sqrt(xn*xn+yn*yn) > 2) {
             return i;
         }
         x = xn; y = yn;
@@ -177,7 +182,7 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct App*  app)
     return FALSE;
 }
 
-static void close_window(struct App* app)
+static void close_window(GtkWidget* widget, struct App* app)
 {   
     if (app->surface)
     {

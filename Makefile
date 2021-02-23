@@ -15,7 +15,7 @@ endif
 
 COMPILER ?= $(CC)
 
-All: mandelbrot.exe
+All: mandelbrot.exe julia.exe
 
 clean:
 		rm -f *.o *.exe 
