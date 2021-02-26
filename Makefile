@@ -15,13 +15,13 @@ endif
 
 COMPILER ?= $(CC)
 
-All: mandelbrot.exe julia.exe
+All: mandelbrot.exe mandelbulb.exe julia.exe
 
 clean:
 		rm -f *.o *.exe 
 
 %.exe: %.o Makefile
-		$(COMPILER) $< $(CFLAGS) `pkg-config --libs gtk+-3.0` -lm -o $@
+		$(COMPILER) $< $(CFLAGS) `pkg-config --libs gtk+-3.0 epoxy` -lm -o $@
 
 %.o: %.c Makefile
-		$(COMPILER) -g -Wall $(CFLAGS) `pkg-config --cflags gtk+-3.0` -c $< -o $@
+		$(COMPILER) -g -Wall $(CFLAGS) `pkg-config --cflags gtk+-3.0 epoxy` -c $< -o $@
