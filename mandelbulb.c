@@ -146,7 +146,7 @@ int get_iteration(double x0, double y0, double z0) {
 }
 
 static void calc_surface(struct App* app) {
-    int stride = 1024; // 128; // 1024;
+    int stride = 1024; // 512; // 128; // 1024;
     int width = stride;
     int height = stride;
     int depth = stride;
@@ -243,13 +243,13 @@ done:
         {{x0+d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
 
         // down
-        {{x0-d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
-        {{x0-d, y0+d, z0+d}, {1.0f, 1.0f, 0.0f}},
-        {{x0+d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
+        {{x0-d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0-d, y0+d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0+d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
 
-        {{x0+d, y0+d, z0+d}, {1.0f, 1.0f, 0.0f}},
-        {{x0-d, y0+d, z0+d}, {1.0f, 1.0f, 0.0f}},
-        {{x0+d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
+        {{x0+d, y0+d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0-d, y0+d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0+d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
 
         // left
         {{x0-d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
@@ -279,13 +279,13 @@ done:
         {{x0-d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
 
         // rear
-        {{x0-d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
-        {{x0+d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
-        {{x0-d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
+        {{x0-d, y0+d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0+d, y0+d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0-d, y0+d, z0+d}, {1.0f, 1.0f, 0.0f}},
 
-        {{x0+d, y0-d, z0-d}, {1.0f, 1.0f, 0.0f}},
-        {{x0+d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}},
-        {{x0-d, y0-d, z0+d}, {1.0f, 1.0f, 0.0f}}
+        {{x0+d, y0+d, z0-d}, {1.0f, 1.0f, 0.0f}},
+        {{x0+d, y0+d, z0+d}, {1.0f, 1.0f, 0.0f}},
+        {{x0-d, y0+d, z0+d}, {1.0f, 1.0f, 0.0f}}
         };
 
         memcpy(&vertex_data[j], vd,6*2*3*sizeof(struct VertexInfo));
