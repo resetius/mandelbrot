@@ -5,6 +5,8 @@
 
 #include <epoxy/gl.h>
 
+typedef int (*get_iteration_t)(double, double, double);
+
 struct Point {
     float v[3];
 };
@@ -23,6 +25,11 @@ struct VectorOfPoints {
 struct App {
     GtkWidget* window;
     GtkWidget* glarea;
+    GtkWidget* combo1;
+    GtkWidget* combo2;
+    int stride;
+    const char* type;
+
     double tx, ty, tz;
 
     guint program;
@@ -35,6 +42,7 @@ struct App {
 
     struct VertexInfo* vertex_data;
     int nvertex;
+    get_iteration_t get_iteration;
 };
 
 static void
@@ -100,8 +108,7 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, struct Ap
     return TRUE;
 }
 
-int get_iteration(double x0, double y0, double z0) {
-//    int n = 8;
+int get_iteration_quintic(double x0, double y0, double z0) {
     double x = 0;
     double y = 0;
     double z = 0;
@@ -113,19 +120,6 @@ int get_iteration(double x0, double y0, double z0) {
     C = 2;
 
     for (i = 1; i<32; i=i+1) {
-        // wikipedia
-
-        /*
-        double r = sqrt(x*x+y*y+z*z);
-        double theta = atan(y/x);
-        double phi = atan(z/sqrt(x*x+y*y));
-
-        double rn = r*r*r*r*r*r*r*r;
-        xn = rn*cos(n*theta)*cos(n*phi) + x0;
-        yn = rn*sin(n*theta)*cos(n*phi) + y0;
-        zn = rn*sin(n*phi) + z0;
-        */
-
         double x2 = x*x, x3 = x*x2, x4 = x*x3;
         double y2 = y*y, y3 = y*y2, y4 = y*y3;
         double z2 = z*z, z3 = z*z2, z4 = z*z3;
@@ -145,8 +139,75 @@ int get_iteration(double x0, double y0, double z0) {
     return 0;
 }
 
+int get_iteration_nine(double x0, double y0, double z0) {
+    double x = 0;
+    double y = 0;
+    double z = 0;
+    double xn, yn, zn;
+    int i;
+
+    for (i = 1; i<32; i=i+1) {
+        double x2 = x*x, x3 = x*x2, x5 = x3*x2, x7 = x5*x2;
+        double y2 = y*y, y3 = y*y2, y5 = y3*y2, y7 = y5*y2;
+        double z2 = z*z, z3 = z*z2, z5 = z3*z2, z7 = z5*z2;
+
+        xn = x7*x2 - 36*x7*(y2+z2) + 126*x5*(y2+z2)*(y2+z2)-84*x3*(y2+z2)*(y2+z2)*(y2+z2)
+            +9*x*(y2+z2)*(y2+z2)*(y2+z2)*(y2+z2)+x0;
+        yn = y7*y2 - 36*y7*(z2+x2) + 126*y5*(z2+x2)*(z2+x2)-84*y3*(z2+x2)*(z2+x2)*(z2+x2)
+            +9*y*(z2+x2)*(z2+x2)*(z2+x2)*(z2+x2)+y0;
+        zn = z7*z2 - 36*z7*(x2+y2) + 126*z5*(x2+y2)*(x2+y2)-84*z3*(x2+y2)*(x2+y2)*(x2+y2)
+            +9*z*(x2+y2)*(x2+y2)*(x2+y2)*(x2+y2)+z0;
+
+        if (sqrt(xn*xn+yn*yn+zn*zn) > 2) {
+            return i;
+        }
+        x = xn; y = yn; z = zn;
+    }
+    return 0;
+}
+
+int get_iteration_quadratic(double x0, double y0, double z0) {
+    double x = 0;
+    double y = 0;
+    double z = 0;
+    double xn, yn, zn;
+    int i;
+
+    for (i = 1; i<32; i=i+1) {
+        xn = x*x-y*y-z*z+x0;
+        yn = 2*x*z+y0;
+        zn = 2*x*y+z0;
+
+        if (sqrt(xn*xn+yn*yn+zn*zn) > 2) {
+            return i;
+        }
+        x = xn; y = yn; z = zn;
+    }
+    return 0;
+}
+
+int get_iteration_cubic(double x0, double y0, double z0) {
+    double x = 0;
+    double y = 0;
+    double z = 0;
+    double xn, yn, zn;
+    int i;
+
+    for (i = 1; i<32; i=i+1) {
+        xn = x*x*x-3*x*(y*y+z*z)+x0;
+        yn = -y*y*y+3*y*x*x-y*z*z+y0;
+        zn = z*z*z-3*z*x*x+z*y*y+z0;
+
+        if (sqrt(xn*xn+yn*yn+zn*zn) > 2) {
+            return i;
+        }
+        x = xn; y = yn; z = zn;
+    }
+    return 0;
+}
+
 static void calc_surface(struct App* app) {
-    int stride = 1024; // 512; // 128; // 1024;
+    int stride = app->stride; // 256; // 512; // 128; // 1024;
     int width = stride;
     int height = stride;
     int depth = stride;
@@ -164,7 +225,7 @@ static void calc_surface(struct App* app) {
                         v[i] *= 4;
                     }
 
-                    int it = get_iteration(v[0], v[1], v[2]);
+                    int it = app->get_iteration(v[0], v[1], v[2]);
                     if (it == 0) {
                         int byte = (z*width*height+y*width+x)/64;
                         int bit = (z*width*height+y*width+x)%64;
@@ -544,6 +605,34 @@ init_mvp (float *res)
     res[3] = 0.f; res[7] = 0.f; res[11] = 0.f; res[15] = 1.f;
 }
 
+void combo_changed(GtkComboBox* widget, struct App* app) {
+    if (
+        strcmp(gtk_combo_box_get_active_id(GTK_COMBO_BOX(app->combo1)), app->type)
+        || atoi(gtk_combo_box_get_active_id(GTK_COMBO_BOX(app->combo2))) != app->stride)
+    {
+        app->type = gtk_combo_box_get_active_id(GTK_COMBO_BOX(app->combo1));
+        app->stride = atoi(gtk_combo_box_get_active_id(GTK_COMBO_BOX(app->combo2)));
+
+        if (!strcmp(app->type, "nine")) {
+            app->get_iteration = get_iteration_nine;
+        } else if (!strcmp(app->type, "quintic")) {
+            app->get_iteration = get_iteration_quintic;
+        } else if (!strcmp(app->type, "cubic")) {
+            app->get_iteration = get_iteration_cubic;
+        } else if (!strcmp(app->type, "quadratic")) {
+            app->get_iteration = get_iteration_quadratic;
+        }
+    } else {
+        return;
+    }
+    free(app->vertex_data);
+    app->nvertex = 0;
+    gtk_gl_area_make_current (GTK_GL_AREA(app->glarea));
+    glDeleteVertexArrays(1, &app->vao);
+    init_buffers(app);
+    gtk_widget_queue_draw(app->glarea);
+}
+
 static void close_window(GtkWidget* window, struct App* app)
 {
     /* TODO: cleanup */
@@ -555,21 +644,58 @@ int main(int argc, char** argv) {
     memset(&app, 0, sizeof(struct App));
     GtkWidget* window;
     GtkWidget* glarea;
+    GtkWidget* box_main;
+    GtkWidget* box_top;
+    GtkWidget* combo1;
+    GtkWidget* combo2;
+
     gtk_init(&argc, &argv);
 
     init_mvp (app.mvp);
 
+    app.get_iteration = get_iteration_nine;
+
     window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "Mandelbulb");
     gtk_window_set_default_size(GTK_WINDOW(window), 800, 800);
+
+    box_top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    box_main = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
     glarea = gtk_gl_area_new();
     gtk_gl_area_set_has_depth_buffer(GTK_GL_AREA(glarea), TRUE);
 
-    gtk_container_add(GTK_CONTAINER(window), glarea);
+    gtk_box_pack_end(GTK_BOX(box_main), glarea, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(box_main), box_top, FALSE, TRUE, 0);
+    gtk_container_add(GTK_CONTAINER(window), box_main);
 
+    combo1 = gtk_combo_box_text_new();
+    combo2 = gtk_combo_box_text_new();
+    gtk_box_pack_start(GTK_BOX(box_top), combo1, TRUE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(box_top), combo2, TRUE, TRUE, 0);
+
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo1), "quadratic", "quadratic formula");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo1), "cubic", "cubic formula");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo1), "quintic", "quintic formula");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo1), "nine", "nine formula");
+    gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo1), "nine");
+
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "128", "resolution 128x128x128");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "256", "resolution 256x256x256");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "512", "resolution 512x512x512");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "1024", "resolution 1024x1024x1024");
+
+    gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo2), "256");
+    app.stride = 256;
+    app.type = "nine";
+
+    app.combo1 = combo1;
+    app.combo2 = combo2;
     app.window = window;
     app.glarea = glarea;
 
+    g_signal_connect(combo1, "changed", G_CALLBACK(combo_changed), &app);
+    g_signal_connect(combo2, "changed", G_CALLBACK(combo_changed), &app);
     g_signal_connect(window, "key-press-event", G_CALLBACK(key_press_event), &app);
     g_signal_connect(glarea, "realize", G_CALLBACK(gl_init), &app);
     g_signal_connect(glarea, "render", G_CALLBACK(gl_render), &app);
