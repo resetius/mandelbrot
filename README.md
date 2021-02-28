@@ -11,3 +11,6 @@ Requirements: C compiler, GTK3
 # julia
 
 ![julia](https://github.com/resetius/mandelbrot/blob/master/img/julia.png?raw=true)
+
+# mandelbulb
+![mandelbulb](https://github.com/resetius/mandelbrot/blob/master/img/mandelbulb.png?raw=true)
