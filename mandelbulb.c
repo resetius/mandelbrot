@@ -2,6 +2,8 @@
 #include <math.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #include <epoxy/gl.h>
 
@@ -208,16 +210,16 @@ int get_iteration_cubic(double x0, double y0, double z0) {
 
 static void calc_surface(struct App* app) {
     int stride = app->stride; // 256; // 512; // 128; // 1024;
-    int width = stride;
-    int height = stride;
-    int depth = stride;
-    unsigned long long* mask = calloc(1, width*height*depth);
+    long width = stride;
+    long height = stride;
+    long depth = stride;
+    unsigned long long* mask = calloc(1, width*height*depth/8);
 #pragma omp parallel for
-    for (int zbyte = 0; zbyte < depth/64; zbyte=zbyte+1) {
-        for (int z = zbyte*64; z < (zbyte+1)*64; z=z+1) {
+    for (long zbyte = 0; zbyte < depth/64; zbyte=zbyte+1) {
+        for (long z = zbyte*64; z < (zbyte+1)*64; z=z+1) {
      //    for (int z = 0; z < depth; z=z+1) {
-            for (int y = 0; y < height; y=y+1) {
-                for (int x = 0; x < width; x=x+1) {
+            for (long y = 0; y < height; y=y+1) {
+                for (long x = 0; x < width; x=x+1) {
                     double v[3] = {x,y,z};
                     for (int i = 0; i < 3; i=i+1) {
                         v[i] /= stride;
@@ -227,31 +229,30 @@ static void calc_surface(struct App* app) {
 
                     int it = app->get_iteration(v[0], v[1], v[2]);
                     if (it == 0) {
-                        int byte = (z*width*height+y*width+x)/64;
-                        int bit = (z*width*height+y*width+x)%64;
+                        long byte = (z*width*height+y*width+x)/64;
+                        long bit = (z*width*height+y*width+x)%64;
                         mask[byte] |= (1ULL << bit);
                     }
                 }
             }
         }
     }
-
-    struct VectorOfPoints Z[1024];
+    struct VectorOfPoints Z[2048];
     memset(Z, 0, sizeof(Z));
 #pragma omp parallel for
-    for (int z = 1; z < depth-1; z=z+1) {
-        for (int y = 1; y < height-1; y=y+1) {
-            for (int x = 1; x < width-1; x=x+1) {
+    for (long z = 1; z < depth-1; z=z+1) {
+        for (long y = 1; y < height-1; y=y+1) {
+            for (long x = 1; x < width-1; x=x+1) {
                 int byte = (z*width*height+y*width+x)/64;
                 int bit = (z*width*height+y*width+x)%64;
                 if (! (mask[byte] & (1ULL << bit))) {
                     continue;
                 }
-                for (int i = -1; i <= 1; i=i+1) {
-                    for (int j = -1; j <= 1; j=j+1) {
-                        for (int k = -1; k <= 1; k=k+1) {
-                            int byte = ((z+i)*width*height+(y+j)*width+(x+k))/64;
-                            int bit = ((z+i)*width*height+(y+j)*width+(x+k))%64;
+                for (long i = -1; i <= 1; i=i+1) {
+                    for (long j = -1; j <= 1; j=j+1) {
+                        for (long k = -1; k <= 1; k=k+1) {
+                            long byte = ((z+i)*width*height+(y+j)*width+(x+k))/64;
+                            long bit = ((z+i)*width*height+(y+j)*width+(x+k))%64;
                             if (! (mask[byte] & (1ULL << bit))) {
                                 if (Z[z].size >= Z[z].capacity) {
                                     Z[z].capacity = (Z[z].capacity+1)*2;
@@ -286,7 +287,7 @@ done:
     free(mask);
 
     float d = 1.5/stride;
-    int nvertex = npoints*6*2*3;
+    long nvertex = npoints*6*2*3;
     struct VertexInfo* vertex_data = malloc(nvertex*sizeof(struct VertexInfo));
 
     int j = 0;
@@ -366,12 +367,10 @@ gl_render (GtkGLArea *area, GdkGLContext *context, struct App* app)
      */
     glClearColor (0.5, 0.5, 0.5, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
     /* draw our object */
     if (app->program == 0 || app->vao == 0) {
         return FALSE;
     }
-
     /* load our program */
     glUseProgram (app->program);
 
@@ -380,14 +379,11 @@ gl_render (GtkGLArea *area, GdkGLContext *context, struct App* app)
 
     /* use the buffers in the VAO */
     glBindVertexArray (app->vao);
-
     /* draw the three vertices as a triangle */
     glDrawArrays (GL_TRIANGLES, 0, app->nvertex);
-
     /* we finished using the buffers and program */
     glBindVertexArray (0);
     glUseProgram (0);
-
     /* flush the contents of the pipeline */
     glFlush ();
 
@@ -544,35 +540,30 @@ static void init_buffers(struct App* app) {
     guint color_index = app->color_location;
     guint position_index = app->position_location;
     struct VertexInfo* vertex_data = app->vertex_data;
-    int nvertex = app->nvertex;
+    long nvertex = app->nvertex;
 
     /* we need to create a VAO to store the other buffers */
     glGenVertexArrays (1, &vao);
     glBindVertexArray (vao);
-
     /* this is the VBO that holds the vertex data */
     glGenBuffers (1, &buffer);
     glBindBuffer (GL_ARRAY_BUFFER, buffer);
     glBufferData (GL_ARRAY_BUFFER, nvertex*sizeof(struct VertexInfo), vertex_data, GL_STATIC_DRAW);
-
     /* enable and set the position attribute */
     glEnableVertexAttribArray (position_index);
     glVertexAttribPointer (
         position_index, 3, GL_FLOAT, GL_FALSE,
         sizeof (struct VertexInfo),
         (GLvoid *) (G_STRUCT_OFFSET (struct VertexInfo, position)));
-
     /* enable and set the color attribute */
     glEnableVertexAttribArray (color_index);
     glVertexAttribPointer (
         color_index, 3, GL_FLOAT, GL_FALSE,
         sizeof (struct VertexInfo),
         (GLvoid *) (G_STRUCT_OFFSET (struct VertexInfo, color)));
-
     /* reset the state; we will re-enable the VAO when needed */
     glBindBuffer (GL_ARRAY_BUFFER, 0);
     glBindVertexArray (0);
-
     /* the VBO is referenced by the VAO */
     glDeleteBuffers (1, &buffer);
 
@@ -684,6 +675,7 @@ int main(int argc, char** argv) {
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "256", "resolution 256x256x256");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "512", "resolution 512x512x512");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "1024", "resolution 1024x1024x1024");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo2), "1280", "resolution 1280x1280x1280");
 
     gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo2), "256");
     app.stride = 256;
@@ -701,10 +693,6 @@ int main(int argc, char** argv) {
     g_signal_connect(glarea, "render", G_CALLBACK(gl_render), &app);
 
     g_signal_connect(window, "destroy", G_CALLBACK(close_window), &app);
-
-    //fprintf(stderr, "calc surface\n");
-    //calc_surface(&app);
-    //fprintf(stderr, "calc surface done\n");
 
     gtk_widget_show_all (window);
 

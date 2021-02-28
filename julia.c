@@ -5,6 +5,7 @@
 
 #include <gtk/gtk.h>
 #include <math.h>
+#include <stdlib.h>
 
 struct JuliaParams {
     double x;
