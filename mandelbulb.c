@@ -282,6 +282,7 @@ done:
     for (int z = 1; z < depth-1; z=z+1) {
         memcpy(&points[npoints], Z[z].data, Z[z].size*sizeof(struct Point));
         npoints += Z[z].size;
+        free(Z[z].data);
     }
     fprintf(stderr, "boundary: %d\n", boundary);
     free(mask);
@@ -596,6 +597,21 @@ init_mvp (float *res)
     res[3] = 0.f; res[7] = 0.f; res[11] = 0.f; res[15] = 1.f;
 }
 
+void cleanup(struct App* app) {
+    if (app->vao) {
+        glDeleteVertexArrays(1, &app->vao);
+        app->vao = 0;
+    }
+    free(app->vertex_data); app->vertex_data = NULL;
+    app->nvertex = 0;
+}
+
+void gl_cleanup(GtkWidget* widget, struct App* app)
+{
+    gtk_gl_area_make_current (GTK_GL_AREA(widget));
+    cleanup(app);
+}
+
 void combo_changed(GtkComboBox* widget, struct App* app) {
     if (
         strcmp(gtk_combo_box_get_active_id(GTK_COMBO_BOX(app->combo1)), app->type)
@@ -616,17 +632,14 @@ void combo_changed(GtkComboBox* widget, struct App* app) {
     } else {
         return;
     }
-    free(app->vertex_data);
-    app->nvertex = 0;
-    gtk_gl_area_make_current (GTK_GL_AREA(app->glarea));
-    glDeleteVertexArrays(1, &app->vao);
+    gtk_gl_area_make_current (GTK_GL_AREA(widget));
+    cleanup(app);
     init_buffers(app);
     gtk_widget_queue_draw(app->glarea);
 }
 
 static void close_window(GtkWidget* window, struct App* app)
 {
-    /* TODO: cleanup */
     gtk_main_quit();
 }
 
@@ -692,6 +705,7 @@ int main(int argc, char** argv) {
     g_signal_connect(glarea, "realize", G_CALLBACK(gl_init), &app);
     g_signal_connect(glarea, "render", G_CALLBACK(gl_render), &app);
 
+    g_signal_connect(glarea, "unrealize", G_CALLBACK(gl_cleanup), &app);
     g_signal_connect(window, "destroy", G_CALLBACK(close_window), &app);
 
     gtk_widget_show_all (window);
