@@ -13,7 +13,7 @@ struct JuliaParams {
 };
 
 struct JuliaSurface {
-    cairo_surface_t *surface;
+    GdkPixbuf* pixbuf;
     struct JuliaParams params;
 };
 
@@ -36,31 +36,6 @@ static struct JuliaParams params[] = {
     {-0.24, 0.74}, {-0.12, 0.74}, {-0.012, 0.74}, {-0.0012, 0.74},
     {-0.11031, -1}, {-0.11, -0.63}, {-0.11, -0.635}, {0.108294, -0.670487}
 };
-
-static void clear_surface(cairo_surface_t *surface)
-{
-    cairo_t *cr;
-    cr = cairo_create(surface);
-
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_paint(cr);
-
-    cairo_destroy(cr);
-}
-
-static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, struct JuliaSurface* j)
-{
-    if (j->surface)
-        cairo_surface_destroy(j->surface);
-
-    j->surface = gdk_window_create_similar_surface(gtk_widget_get_window(widget), CAIRO_CONTENT_COLOR,
-                                                gtk_widget_get_allocated_width(widget),
-                                                gtk_widget_get_allocated_height(widget));
-
-    clear_surface(j->surface);
-
-    return TRUE;
-}
 
 int get_iteration_julia(double x0, double y0, struct JuliaSurface* j) {
     int i;
@@ -100,9 +75,11 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *x0 = x; *y0 = y;
 }
 
-static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct JuliaSurface* j)
+static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, struct JuliaSurface* j)
 {
-    double x0, y0;
+    if (j->pixbuf) {
+        g_object_unref(j->pixbuf);
+    }
 
     int width = gtk_widget_get_allocated_width (widget);
     int height = gtk_widget_get_allocated_height (widget);
@@ -116,6 +93,7 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct JuliaSurface* j)
     guchar* p;
 
     int it;
+    double x0, y0;
 
     for (y = 0; y < height; y=y+1) {
         for (x = 0; x < width; x=x+1) {
@@ -136,21 +114,25 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct JuliaSurface* j)
         }
     }
 
-    gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+    j->pixbuf = pixbuf;
 
-    g_object_unref(pixbuf);
+    return TRUE;
+}
 
+static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct JuliaSurface* j)
+{
+    gdk_cairo_set_source_pixbuf(cr, j->pixbuf, 0, 0);
     cairo_paint(cr);
 
-    return FALSE;
+    return TRUE;
 }
 
 static void close_window(GtkWidget *widget, struct App* app)
 {
     int i;
     for (i = 0; i < app->nsurfaces; i=i+1) {
-        if (app->surfaces[i].surface) {
-            cairo_surface_destroy(app->surfaces[i].surface);
+        if (app->surfaces[i].pixbuf) {
+            g_object_unref(app->surfaces[i].pixbuf);
         }
     }
 
@@ -178,7 +160,7 @@ int main(int argc, char** argv) {
         for (col = 0; col < cols; col=col+1) {
             char buf[256];
             struct JuliaSurface* j = &app.surfaces[row*cols + col];
-            j->surface = NULL;
+            j->pixbuf = NULL;
             j->params = params[row*cols + col];
             if (j->params.y >= 0) {
                 snprintf(buf, 256, "%.6lf+%.6lf i", j->params.x, j->params.y);

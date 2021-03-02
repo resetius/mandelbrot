@@ -8,7 +8,7 @@
 #include <stdlib.h>
 
 struct App {
-    cairo_surface_t *surface;
+    GdkPixbuf* pixbuf;
     GtkWidget* window;
     GtkWidget* entry;
     GtkWidget* drawing_area;
@@ -16,31 +16,6 @@ struct App {
     double julia_y;
     int julia;
 };
-
-static void clear_surface(cairo_surface_t *surface)
-{
-    cairo_t *cr;
-    cr = cairo_create(surface);
-
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_paint(cr);
-
-    cairo_destroy(cr);
-}
-
-static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, struct App* app)
-{
-    if (app->surface)
-        cairo_surface_destroy(app->surface);
-
-    app->surface = gdk_window_create_similar_surface(gtk_widget_get_window(widget), CAIRO_CONTENT_COLOR,
-                                                gtk_widget_get_allocated_width(widget),
-                                                gtk_widget_get_allocated_height(widget));
-
-    clear_surface(app->surface);
-
-    return TRUE;
-}
 
 int get_iteration_mandelbrot(double x0, double y0, struct App* app) {
     double x = 0;
@@ -95,6 +70,57 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *x0 = x; *y0 = y;
 }
 
+static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, struct App* app)
+{
+    if (app->pixbuf) {
+        g_object_unref(app->pixbuf);
+    }
+
+    int width = gtk_widget_get_allocated_width (widget);
+    int height = gtk_widget_get_allocated_height (widget);
+
+    GdkPixbuf *	pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, FALSE, 8, width, height);
+
+    int n_channels = gdk_pixbuf_get_n_channels (pixbuf);
+    int rowstride = gdk_pixbuf_get_rowstride (pixbuf);
+    int x, y;
+    guchar* pixels = gdk_pixbuf_get_pixels (pixbuf);
+    guchar* p;
+
+    int it;
+    double x0, y0;
+
+    int (*get_iteration)(double x0, double y0, struct App* app);
+    if (app->julia) {
+        get_iteration = get_iteration_julia;
+    } else {
+        get_iteration = get_iteration_mandelbrot;
+    }
+
+    for (y = 0; y < height; y=y+1) {
+        for (x = 0; x < width; x=x+1) {
+            from_screen(&x0, &y0, x, y, width, height);
+ 
+            p = pixels + y * rowstride + x * n_channels;
+            it = get_iteration(x0, y0, app);
+
+            if (it == 0) {
+                p[0] = 255; // r
+                p[1] = 0;
+                p[2] = 0;
+            } else {
+                p[0] = it*8;
+                p[1] = it*8;
+                p[2] = (32-it)*8;
+            }
+        }
+    }
+
+    app->pixbuf = pixbuf;
+
+    return TRUE;
+}
+
 static gboolean motion_notify_event_cb(GtkWidget *widget, GdkEventMotion *event, struct App* app)
 {
     int width = gtk_widget_get_allocated_width (widget);
@@ -133,61 +159,17 @@ static gboolean reset_button_released_event_cb(GtkButton *btn, struct App* app)
 
 static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct App*  app)
 {
-    double x0, y0;
-
-    int width = gtk_widget_get_allocated_width (widget);
-    int height = gtk_widget_get_allocated_height (widget);
-
-    GdkPixbuf *	pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, FALSE, 8, width, height);
-
-    int n_channels = gdk_pixbuf_get_n_channels (pixbuf);
-    int rowstride = gdk_pixbuf_get_rowstride (pixbuf);
-    int x, y;
-    guchar* pixels = gdk_pixbuf_get_pixels (pixbuf);
-    guchar* p;
-
-    int it;
-
-    int (*get_iteration)(double x0, double y0, struct App* app);
-    if (app->julia) {
-        get_iteration = get_iteration_julia;
-    } else {
-        get_iteration = get_iteration_mandelbrot;
-    }
-
-    for (y = 0; y < height; y=y+1) {
-        for (x = 0; x < width; x=x+1) {
-            from_screen(&x0, &y0, x, y, width, height);
- 
-            p = pixels + y * rowstride + x * n_channels;
-            it = get_iteration(x0, y0, app);
-
-            if (it == 0) {
-                p[0] = 255; // r
-                p[1] = 0;
-                p[2] = 0;
-            } else {
-                p[0] = it*8;
-                p[1] = it*8;
-                p[2] = (32-it)*8;
-            }
-        }
-    }
-
-    gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
-
-    g_object_unref(pixbuf);
-
+    gdk_cairo_set_source_pixbuf(cr, app->pixbuf, 0, 0);
     cairo_paint(cr);
 
-    return FALSE;
+    return TRUE;
 }
 
 static void close_window(GtkWidget* widget, struct App* app)
 {   
-    if (app->surface)
+    if (app->pixbuf)
     {
-        cairo_surface_destroy(app->surface);
+        g_object_unref(app->pixbuf);
     }
 
     gtk_main_quit();
