@@ -222,7 +222,7 @@ static gboolean button_press_event_cb(GtkWidget *widget, GdkEventButton *event, 
     return TRUE;
 }
 
-static gboolean reset_button_released_event_cb(GtkButton *btn, struct App* app)
+static gboolean reset_button_released_event_cb(GtkWidget *btn, GdkEvent  *event, struct App* app)
 {
     if (app->timer_id > 0)
     {
@@ -254,7 +254,7 @@ static gboolean redraw_timeout(struct App *app)
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
 }
 
-static gboolean run_button_released_event_cb(GtkButton *btn, struct App* app)
+static gboolean run_button_released_event_cb(GtkWidget *btn, GdkEvent* event, struct App* app)
 {
     app->julia = 1;
     app->t = 0;
@@ -338,8 +338,8 @@ int main(int argc, char** argv) {
     g_signal_connect(drawing_area, "configure-event", G_CALLBACK(configure_event_cb), &app);
     g_signal_connect(drawing_area, "motion-notify-event", G_CALLBACK(motion_notify_event_cb), &app);
     g_signal_connect(drawing_area, "button-press-event", G_CALLBACK(button_press_event_cb), &app);
-    g_signal_connect(button, "released", G_CALLBACK(reset_button_released_event_cb), &app);
-    g_signal_connect(button2, "released", G_CALLBACK(run_button_released_event_cb), &app);
+    g_signal_connect(button, "button-release-event", G_CALLBACK(reset_button_released_event_cb), &app);
+    g_signal_connect(button2, "button-release-event", G_CALLBACK(run_button_released_event_cb), &app);
 
     g_signal_connect(window, "destroy", G_CALLBACK(close_window), &app);
 
