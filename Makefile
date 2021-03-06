@@ -20,6 +20,9 @@ All: mandelbrot.exe mandelbulb.exe julia.exe
 clean:
 		rm -f *.o *.exe 
 
+mandelbulb.exe: mandelbulb_gui.o mandelbulb.o
+		$(COMPILER) $^ $(CFLAGS) `pkg-config --libs gtk+-3.0 epoxy` -lm -o $@
+
 %.exe: %.o Makefile
 		$(COMPILER) $< $(CFLAGS) `pkg-config --libs gtk+-3.0 epoxy` -lm -o $@
 
