@@ -252,6 +252,7 @@ static gboolean redraw_timeout(struct App *app)
     gtk_window_set_title(GTK_WINDOW(app->window), title);
 
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
+    return TRUE;
 }
 
 static gboolean run_button_released_event_cb(GtkWidget *btn, GdkEvent* event, struct App* app)
@@ -260,6 +261,11 @@ static gboolean run_button_released_event_cb(GtkWidget *btn, GdkEvent* event, st
     app->t = 0;
     app->julia_x = 0;
     app->julia_y = 0;
+    if (app->timer_id > 0)
+    {
+        g_source_remove(app->timer_id);
+        app->timer_id = 0;
+    }
     app->timer_id = g_timeout_add(100, (GSourceFunc)redraw_timeout, app);
     return TRUE;
 }
