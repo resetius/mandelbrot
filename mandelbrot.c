@@ -15,8 +15,10 @@ struct App {
     GtkWidget* drawing_area;
     double julia_x;
     double julia_y;
+    double t;
     int julia;
     int max_iteration;
+    int timer_id;
 };
 
 double get_iteration_mandelbrot(double x0, double y0, struct App* app) {
@@ -222,10 +224,43 @@ static gboolean button_press_event_cb(GtkWidget *widget, GdkEventButton *event, 
 
 static gboolean reset_button_released_event_cb(GtkButton *btn, struct App* app)
 {
+    if (app->timer_id > 0)
+    {
+        g_source_remove(app->timer_id);
+        app->timer_id = 0;
+    }
+    app->t = 0;
     app->julia = 0;
     create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
     gtk_window_set_title(GTK_WINDOW(app->window), "Mandelbrot");
+    return TRUE;
+}
+
+static gboolean redraw_timeout(struct App *app)
+{
+    app->t += 0.001;
+    app->julia_x = 2*cos(7*app->t);
+    app->julia_y = 2*sin(11*app->t);
+    create_pixbuf(GTK_WIDGET (app->drawing_area), app);
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "%.4le + %.4le i", app->julia_x, app->julia_y);
+    gtk_entry_set_text(GTK_ENTRY(app->entry), buf);
+
+    char title[2048];
+    sprintf(title, "Julia: %s", buf);
+    gtk_window_set_title(GTK_WINDOW(app->window), title);
+
+    gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
+}
+
+static gboolean run_button_released_event_cb(GtkButton *btn, struct App* app)
+{
+    app->julia = 1;
+    app->t = 0;
+    app->julia_x = 0;
+    app->julia_y = 0;
+    app->timer_id = g_timeout_add(100, (GSourceFunc)redraw_timeout, app);
     return TRUE;
 }
 
@@ -254,8 +289,10 @@ int main(int argc, char** argv) {
     GtkWidget* drawing_area;
     GtkWidget* box; /*main box*/
     GtkWidget* box_right; /*right box with button*/
+    GtkWidget* box_buttons;
     GtkWidget* entry;
     GtkWidget* button;
+    GtkWidget* button2;
     gtk_init(&argc, &argv);
 
     window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
@@ -264,17 +301,22 @@ int main(int argc, char** argv) {
     drawing_area = gtk_drawing_area_new();
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     box_right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    box_buttons = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     entry = gtk_entry_new();
     button = gtk_button_new_with_label("reset");
+    button2 = gtk_button_new_with_label("run");
 
     gtk_container_add(GTK_CONTAINER(window), box);
     gtk_box_pack_start(GTK_BOX(box), drawing_area, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(box), box_right, FALSE, TRUE, 0);
 
     gtk_box_pack_start(GTK_BOX(box_right), entry, FALSE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(box_right), box_buttons, FALSE, TRUE, 0);
 
-    gtk_box_pack_end(GTK_BOX(box_right), button, FALSE, TRUE, 0);
-    gtk_box_set_child_packing(GTK_BOX(box_right), button, FALSE, TRUE, 0, GTK_PACK_START);
+    gtk_box_pack_start(GTK_BOX(box_buttons), button, FALSE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(box_buttons), button2, FALSE, TRUE, 0);
+
+    gtk_box_set_child_packing(GTK_BOX(box_right), box_buttons, FALSE, TRUE, 0, GTK_PACK_START);
 
     gtk_widget_set_events(drawing_area,
                           gtk_widget_get_events(drawing_area) 
@@ -297,6 +339,7 @@ int main(int argc, char** argv) {
     g_signal_connect(drawing_area, "motion-notify-event", G_CALLBACK(motion_notify_event_cb), &app);
     g_signal_connect(drawing_area, "button-press-event", G_CALLBACK(button_press_event_cb), &app);
     g_signal_connect(button, "released", G_CALLBACK(reset_button_released_event_cb), &app);
+    g_signal_connect(button2, "released", G_CALLBACK(run_button_released_event_cb), &app);
 
     g_signal_connect(window, "destroy", G_CALLBACK(close_window), &app);
 
