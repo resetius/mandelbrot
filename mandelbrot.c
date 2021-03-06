@@ -25,7 +25,7 @@ double get_iteration_mandelbrot(double x0, double y0, struct App* app) {
     double xn, yn;
     int i;
     double fract_i;
-    for (i = 1; i<app->max_iteration && x*x+y*y < 4; i=i+1) {
+    for (i = 1; i<app->max_iteration && x*x+y*y < 1<<16; i=i+1) {
         xn = x*x - y*y + x0;
         yn = 2*x*y + y0;
         x = xn; y = yn;
@@ -50,7 +50,7 @@ double get_iteration_julia(double x0, double y0, struct App* app) {
     double xn;
     double yn;
     double fract_i;
-    for (i = 1; i<app->max_iteration && x*x+y*y < 4; i=i+1) {
+    for (i = 1; i<app->max_iteration && x*x+y*y < 1<<16; i=i+1) {
         xn = x*x - y*y + cx;
         yn = 2*x*y + cy;
         x = xn; y = yn;
@@ -84,18 +84,60 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *x0 = x; *y0 = y;
 }
 
-void linear_interpolate(guchar* p, double it) {
-    int off = 50;
-    for (int i = 0; i < 3; ++i) {
-        double fractpart, intpart;
-        fractpart = modf(it, &intpart);
-        int j = off+intpart;
-        int c1 = colormap_vga1[j][i];
-        int c2 = colormap_vga1[j+1][i];
+static void hsv2rgb(guchar* rgb, int h, double s, double v) {
+    double r[3] = {0};
+    int h1 = h/60; h1 %= 6;
+    double vmin = (1-s)*v;
+    double a = (v-vmin)*(h%60)/60.0;
+    double vinc = vmin+a;
+    double vdec = v-a;
 
-        int y = c1 + fractpart * (c2 - c1);
-        p[i] = y;
+    switch (h1) {
+        case 0:
+            r[0] = v; r[1] = vinc; r[2] = vmin;
+            break;
+        case 1:
+            r[0] = vdec; r[1] = v; r[2] = vmin;
+            break;
+        case 2:
+            r[0] = vmin; r[1] = v; r[2] = vinc;
+            break;
+        case 3:
+            r[0] = vmin; r[1] = vdec; r[2] = v;
+            break;
+        case 4:
+            r[0] = vinc; r[1] = vmin; r[2] = v;
+            break;
+        case 5:
+            r[0] = v; r[1] = vmin; r[2] = vdec;
+            break;
+        default:
+            break;
     }
+
+    for (int i = 0; i < 3; i=i+1) {
+        rgb[i] = (guchar)(r[i]*255);
+    }
+
+   // printf("%d %f %f -> %d %d %d,  %f %f %f\n", h, s, v, rgb[0], rgb[1], rgb[2], r[0], r[1], r[2]);
+}
+
+static void linear_interpolate(guchar* p, double it, int max_iteration) {
+    int off = 150;
+    double fractpart, intpart;
+    it /= max_iteration;
+    it *= 360;
+    fractpart = modf(it, &intpart);
+    int j = round(intpart);
+    int h1 = 20*j;
+    int h2 = 20*(j+1);
+    int h = h1 + fractpart * (h2 - h1);
+    hsv2rgb(p, off+h1, 1, 1);
+    h = off+h;
+    if (h > 360) {
+        h %= 360;
+    }
+    hsv2rgb(p, h, 1, 1);
 }
 
 static void create_pixbuf(GtkWidget *widget, struct App* app)
@@ -132,7 +174,7 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
             it = get_iteration(x0, y0, app);
 
             if (it < app->max_iteration) {
-                linear_interpolate(p, it);
+                linear_interpolate(p, it, app->max_iteration);
             } else {
                 p[0] = 255; // r
                 p[1] = 0;
@@ -181,6 +223,7 @@ static gboolean button_press_event_cb(GtkWidget *widget, GdkEventButton *event, 
 static gboolean reset_button_released_event_cb(GtkButton *btn, struct App* app)
 {
     app->julia = 0;
+    create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
     gtk_window_set_title(GTK_WINDOW(app->window), "Mandelbrot");
     return TRUE;
