@@ -6,6 +6,7 @@
 #include <gtk/gtk.h>
 #include <math.h>
 #include <stdlib.h>
+#include "colormap_vga1.h"
 
 struct App {
     GdkPixbuf* pixbuf;
@@ -25,7 +26,7 @@ int get_iteration_mandelbrot(double x0, double y0, struct App* app) {
     for (i = 1; i<32; i=i+1) {
         xn = x*x - y*y + x0;
         yn = 2*x*y + y0;
-        if (sqrt(xn*xn+yn*yn) > 1e4) {
+        if (xn*xn+yn*yn > 4) {
             return i;
         }
         x = xn; y = yn;
@@ -41,10 +42,10 @@ int get_iteration_julia(double x0, double y0, struct App* app) {
     double y = y0;
     double xn;
     double yn;
-    for (i = 1; i<32; i=i+1) {
+    for (i = 1; i<200; i=i+1) {
         xn = x*x - y*y + cx;
         yn = 2*x*y + cy;
-        if (sqrt(xn*xn+yn*yn) > 2) {
+        if (xn*xn+yn*yn > 4) {
             return i;
         }
         x = xn; y = yn;
@@ -70,7 +71,7 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *x0 = x; *y0 = y;
 }
 
-static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, struct App* app)
+static void create_pixbuf(GtkWidget *widget, struct App* app)
 {
     if (app->pixbuf) {
         g_object_unref(app->pixbuf);
@@ -96,28 +97,30 @@ static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, 
     } else {
         get_iteration = get_iteration_mandelbrot;
     }
-
     for (y = 0; y < height; y=y+1) {
         for (x = 0; x < width; x=x+1) {
             from_screen(&x0, &y0, x, y, width, height);
  
             p = pixels + y * rowstride + x * n_channels;
             it = get_iteration(x0, y0, app);
-
             if (it == 0) {
                 p[0] = 255; // r
                 p[1] = 0;
                 p[2] = 0;
             } else {
-                p[0] = it*8;
-                p[1] = it*8;
-                p[2] = (32-it)*8;
+                int off = 50;
+                p[0] = colormap_vga1[it+off][0];
+                p[1] = colormap_vga1[it+off][1];
+                p[2] = colormap_vga1[it+off][2];
             }
         }
     }
-
     app->pixbuf = pixbuf;
+}
 
+static gboolean configure_event_cb(GtkWidget *widget, GdkEventConfigure *event, struct App* app)
+{
+    create_pixbuf(widget, app);
     return TRUE;
 }
 
@@ -144,6 +147,7 @@ static gboolean button_press_event_cb(GtkWidget *widget, GdkEventButton *event, 
     app->julia_x = x;
     app->julia_y = y;
     app->julia = 1;
+    create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
     gtk_window_set_title(GTK_WINDOW(app->window), title);
     return TRUE;
