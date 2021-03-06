@@ -16,25 +16,32 @@ struct App {
     double julia_x;
     double julia_y;
     int julia;
+    int max_iteration;
 };
 
-int get_iteration_mandelbrot(double x0, double y0, struct App* app) {
+double get_iteration_mandelbrot(double x0, double y0, struct App* app) {
     double x = 0;
     double y = 0;
     double xn, yn;
     int i;
-    for (i = 1; i<32; i=i+1) {
+    double fract_i;
+    for (i = 1; i<app->max_iteration && x*x+y*y < 4; i=i+1) {
         xn = x*x - y*y + x0;
         yn = 2*x*y + y0;
-        if (xn*xn+yn*yn > 4) {
-            return i;
-        }
         x = xn; y = yn;
     }
-    return 0;
+
+    fract_i = i;
+    if (i < app->max_iteration) {
+        double log_zn = log(x*x + y*y) / 2;
+        double nu = log(log_zn / log(2)) / log(2);
+        fract_i = fract_i + 1 - nu;
+    }
+
+    return fract_i;
 }
 
-int get_iteration_julia(double x0, double y0, struct App* app) {
+double get_iteration_julia(double x0, double y0, struct App* app) {
     int i;
     double cx = app->julia_x;
     double cy = app->julia_y;
@@ -42,15 +49,21 @@ int get_iteration_julia(double x0, double y0, struct App* app) {
     double y = y0;
     double xn;
     double yn;
-    for (i = 1; i<200; i=i+1) {
+    double fract_i;
+    for (i = 1; i<app->max_iteration && x*x+y*y < 4; i=i+1) {
         xn = x*x - y*y + cx;
         yn = 2*x*y + cy;
-        if (xn*xn+yn*yn > 4) {
-            return i;
-        }
         x = xn; y = yn;
     }
-    return 0;
+
+    fract_i = i;
+    if (i < app->max_iteration) {
+        double log_zn = log(x*x + y*y) / 2;
+        double nu = log(log_zn / log(2)) / log(2);
+        fract_i = fract_i + 1 - nu;
+    }
+
+    return fract_i;
 }
 
 static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height) {
@@ -71,6 +84,20 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *x0 = x; *y0 = y;
 }
 
+void linear_interpolate(guchar* p, double it) {
+    int off = 50;
+    for (int i = 0; i < 3; ++i) {
+        double fractpart, intpart;
+        fractpart = modf(it, &intpart);
+        int j = off+intpart;
+        int c1 = colormap_vga1[j][i];
+        int c2 = colormap_vga1[j+1][i];
+
+        int y = c1 + fractpart * (c2 - c1);
+        p[i] = y;
+    }
+}
+
 static void create_pixbuf(GtkWidget *widget, struct App* app)
 {
     if (app->pixbuf) {
@@ -88,10 +115,10 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     guchar* pixels = gdk_pixbuf_get_pixels (pixbuf);
     guchar* p;
 
-    int it;
+    double it;
     double x0, y0;
 
-    int (*get_iteration)(double x0, double y0, struct App* app);
+    double (*get_iteration)(double x0, double y0, struct App* app);
     if (app->julia) {
         get_iteration = get_iteration_julia;
     } else {
@@ -103,15 +130,13 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
  
             p = pixels + y * rowstride + x * n_channels;
             it = get_iteration(x0, y0, app);
-            if (it == 0) {
+
+            if (it < app->max_iteration) {
+                linear_interpolate(p, it);
+            } else {
                 p[0] = 255; // r
                 p[1] = 0;
                 p[2] = 0;
-            } else {
-                int off = 50;
-                p[0] = colormap_vga1[it+off][0];
-                p[1] = colormap_vga1[it+off][1];
-                p[2] = colormap_vga1[it+off][2];
             }
         }
     }
@@ -215,6 +240,7 @@ int main(int argc, char** argv) {
     app.window = window;
     app.entry = entry;
     app.drawing_area = drawing_area;
+    app.max_iteration = 200;
     
     /* readonly entry */
     GValue val = G_VALUE_INIT;
