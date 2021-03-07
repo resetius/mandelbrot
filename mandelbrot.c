@@ -16,6 +16,8 @@ struct App {
     double julia_x;
     double julia_y;
     double t;
+    double zoom;
+    double zoom_initial;
     int julia;
     int max_iteration;
     int timer_id;
@@ -69,7 +71,7 @@ double get_iteration_julia(double x0, double y0, struct App* app) {
     return fract_i;
 }
 
-static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height) {
+static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height, double zoom) {
     double x = screen_x;
     double y = screen_y;
     int w = width < height ? width : height; /* keep aspect ratio */
@@ -84,6 +86,8 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     } else {
         y -= 0.5*d;
     }
+    x *= zoom; y *= zoom;
+    // TODO: fixed zoom point
     *x0 = x; *y0 = y;
 }
 
@@ -168,7 +172,7 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     for (int y = 0; y < height; y=y+1) {
         for (int x = 0; x < width; x=x+1) {
             double x0, y0;
-            from_screen(&x0, &y0, x, y, width, height);
+            from_screen(&x0, &y0, x, y, width, height, app->zoom);
  
             guchar* p = pixels + y * rowstride + x * n_channels;
             double it = get_iteration(x0, y0, app);
@@ -196,7 +200,7 @@ static gboolean motion_notify_event_cb(GtkWidget *widget, GdkEventMotion *event,
     int width = gtk_widget_get_allocated_width (widget);
     int height = gtk_widget_get_allocated_height (widget);
     double x, y;
-    from_screen(&x, &y, event->x, event->y, width, height);
+    from_screen(&x, &y, event->x, event->y, width, height, app->zoom);
     char buf[1024];
     snprintf(buf, sizeof(buf), "%.4le + %.4le i", x, y);
     gtk_entry_set_text(GTK_ENTRY(app->entry), buf);
@@ -280,6 +284,27 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct App*  app)
     return TRUE;
 }
 
+static void
+zoom_begin_cb (GtkGesture       *gesture,
+               GdkEventSequence *sequence,
+               struct App         *app)
+{
+    app->zoom_initial = app->zoom;
+}
+
+static void
+zoom_scale_changed_cb (GtkGestureZoom *z,
+                       gdouble         scale,
+                       struct App       *app)
+{
+    app->zoom = app->zoom_initial / scale;
+    create_pixbuf(GTK_WIDGET (app->drawing_area), app);
+    if (!app->dirty) {
+        gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
+    }
+    app->dirty = 1;
+}
+
 static void close_window(GtkWidget* widget, struct App* app)
 {   
     if (app->timer_id > 0)
@@ -307,12 +332,15 @@ int main(int argc, char** argv) {
     GtkWidget* entry;
     GtkWidget* button;
     GtkWidget* button2;
+    GtkGesture * zoom;
+
     gtk_init(&argc, &argv);
 
     window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "Mandelbrot");
     gtk_window_set_default_size(GTK_WINDOW(window), 600, 400);
     drawing_area = gtk_drawing_area_new();
+    zoom = gtk_gesture_zoom_new(drawing_area);
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     box_right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     box_buttons = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -340,6 +368,8 @@ int main(int argc, char** argv) {
     app.entry = entry;
     app.drawing_area = drawing_area;
     app.max_iteration = 200;
+    app.zoom = 1.0;
+    app.zoom_initial = 1.0;
     
     /* readonly entry */
     GValue val = G_VALUE_INIT;
@@ -356,6 +386,9 @@ int main(int argc, char** argv) {
     g_signal_connect(button2, "button-release-event", G_CALLBACK(run_button_released_event_cb), &app);
 
     g_signal_connect(window, "destroy", G_CALLBACK(close_window), &app);
+
+    g_signal_connect(zoom, "begin", G_CALLBACK(zoom_begin_cb), &app);
+    g_signal_connect(zoom, "scale-changed", G_CALLBACK(zoom_scale_changed_cb), &app);
 
     gtk_widget_show_all (window);
 
