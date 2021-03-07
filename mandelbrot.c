@@ -19,6 +19,7 @@ struct App {
     int julia;
     int max_iteration;
     int timer_id;
+    int dirty;
 };
 
 double get_iteration_mandelbrot(double x0, double y0, struct App* app) {
@@ -155,12 +156,7 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
 
     int n_channels = gdk_pixbuf_get_n_channels (pixbuf);
     int rowstride = gdk_pixbuf_get_rowstride (pixbuf);
-    int x, y;
     guchar* pixels = gdk_pixbuf_get_pixels (pixbuf);
-    guchar* p;
-
-    double it;
-    double x0, y0;
 
     double (*get_iteration)(double x0, double y0, struct App* app);
     if (app->julia) {
@@ -168,12 +164,14 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     } else {
         get_iteration = get_iteration_mandelbrot;
     }
-    for (y = 0; y < height; y=y+1) {
-        for (x = 0; x < width; x=x+1) {
+#pragma omp parallel for
+    for (int y = 0; y < height; y=y+1) {
+        for (int x = 0; x < width; x=x+1) {
+            double x0, y0;
             from_screen(&x0, &y0, x, y, width, height);
  
-            p = pixels + y * rowstride + x * n_channels;
-            it = get_iteration(x0, y0, app);
+            guchar* p = pixels + y * rowstride + x * n_channels;
+            double it = get_iteration(x0, y0, app);
 
             if (it < app->max_iteration) {
                 linear_interpolate(p, it, app->max_iteration);
@@ -251,7 +249,10 @@ static gboolean redraw_timeout(struct App *app)
     sprintf(title, "Julia: %s", buf);
     gtk_window_set_title(GTK_WINDOW(app->window), title);
 
-    gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
+    if (!app->dirty) {
+        gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
+    }
+    app->dirty = 1;
     return TRUE;
 }
 
@@ -274,12 +275,19 @@ static gboolean draw_cb(GtkWidget *widget, cairo_t *cr, struct App*  app)
 {
     gdk_cairo_set_source_pixbuf(cr, app->pixbuf, 0, 0);
     cairo_paint(cr);
+    app->dirty = 0;
 
     return TRUE;
 }
 
 static void close_window(GtkWidget* widget, struct App* app)
 {   
+    if (app->timer_id > 0)
+    {
+        g_source_remove(app->timer_id);
+        app->timer_id = 0;
+    }
+
     if (app->pixbuf)
     {
         g_object_unref(app->pixbuf);
