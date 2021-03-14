@@ -20,6 +20,8 @@ struct App {
     double zoom_initial;
     double zoom_x;
     double zoom_y;
+    int zoom_xx;
+    int zoom_yy;
     int julia;
     int max_iteration;
     int timer_id;
@@ -73,7 +75,7 @@ double get_iteration_julia(double x0, double y0, struct App* app) {
     return fract_i;
 }
 
-static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height, double zoom, double zoom_x, double zoom_y) {
+static void from_screen_(double* x0, double* y0, double screen_x, double screen_y, int width, int height, double zoom, double zoom_x, double zoom_y) {
     double x = screen_x;
     double y = screen_y;
     int w = width < height ? width : height; /* keep aspect ratio */
@@ -92,6 +94,16 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     y = y * zoom + zoom_y - zoom_y * zoom;
     // TODO: fixed zoom point
     *x0 = x; *y0 = y;
+}
+
+static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height, double zoom, double zoom_x, double zoom_y, int zoom_xx, int zoom_yy)
+{
+    double x1, y1;
+    double x2, y2;
+    from_screen_(&x1, &y1, screen_x, screen_y, width, height, zoom, 0, 0);
+    from_screen_(&x2, &y2, zoom_xx, zoom_yy, width, height, zoom, 0, 0);
+    *x0 = x1 - x2 + zoom_x;
+    *y0 = y1 - y2 + zoom_y;
 }
 
 static void hsv2rgb(guchar* rgb, int h, double s, double v) {
@@ -159,6 +171,11 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     int width = gtk_widget_get_allocated_width (widget);
     int height = gtk_widget_get_allocated_height (widget);
 
+    if (app->zoom_xx < 0) {
+        app->zoom_xx = width / 2;
+        app->zoom_yy = height / 2;
+    }
+
     GdkPixbuf *	pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, FALSE, 8, width, height);
 
     int n_channels = gdk_pixbuf_get_n_channels (pixbuf);
@@ -175,7 +192,7 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     for (int y = 0; y < height; y=y+1) {
         for (int x = 0; x < width; x=x+1) {
             double x0, y0;
-            from_screen(&x0, &y0, x, y, width, height, app->zoom, app->zoom_x, app->zoom_y);
+            from_screen(&x0, &y0, x, y, width, height, app->zoom, app->zoom_x, app->zoom_y, app->zoom_xx, app->zoom_yy);
  
             guchar* p = pixels + y * rowstride + x * n_channels;
             double it = get_iteration(x0, y0, app);
@@ -203,12 +220,14 @@ static gboolean motion_notify_event_cb(GtkWidget *widget, GdkEventMotion *event,
     int width = gtk_widget_get_allocated_width (widget);
     int height = gtk_widget_get_allocated_height (widget);
     double x, y;
-    from_screen(&x, &y, event->x, event->y, width, height, app->zoom, app->zoom_x, app->zoom_y);
+    from_screen(&x, &y, event->x, event->y, width, height, app->zoom, app->zoom_x, app->zoom_y, app->zoom_xx, app->zoom_yy);
     char buf[1024];
 
     // fixed point
     app->zoom_x = x;
     app->zoom_y = y;
+    app->zoom_xx = event->x;
+    app->zoom_yy = event->y;
 
     snprintf(buf, sizeof(buf), "%.4le + %.4le i", x, y);
     gtk_entry_set_text(GTK_ENTRY(app->entry), buf);
@@ -244,6 +263,7 @@ static gboolean reset_button_released_event_cb(GtkWidget *btn, GdkEvent  *event,
     app->zoom = 1.0;
     app->zoom_x = 0.0;
     app->zoom_y = 0.0;
+    app->zoom_xx = -1;
     create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
     gtk_window_set_title(GTK_WINDOW(app->window), "Mandelbrot");
@@ -404,6 +424,7 @@ int main(int argc, char** argv) {
     app.drawing_area = drawing_area;
     app.max_iteration = 200;
     app.zoom = 1.0;
+    app.zoom_xx = app.zoom_yy = -1;
     app.zoom_initial = 1.0;
     
     /* readonly entry */
