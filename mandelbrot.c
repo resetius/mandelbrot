@@ -18,6 +18,8 @@ struct App {
     double t;
     double zoom;
     double zoom_initial;
+    double zoom_x;
+    double zoom_y;
     int julia;
     int max_iteration;
     int timer_id;
@@ -71,7 +73,7 @@ double get_iteration_julia(double x0, double y0, struct App* app) {
     return fract_i;
 }
 
-static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height, double zoom) {
+static void from_screen(double* x0, double* y0, double screen_x, double screen_y, int width, int height, double zoom, double zoom_x, double zoom_y) {
     double x = screen_x;
     double y = screen_y;
     int w = width < height ? width : height; /* keep aspect ratio */
@@ -86,7 +88,8 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     } else {
         y -= 0.5*d;
     }
-    x *= zoom; y *= zoom;
+    x = x * zoom + zoom_x - zoom_x * zoom; 
+    y = y * zoom + zoom_y - zoom_y * zoom;
     // TODO: fixed zoom point
     *x0 = x; *y0 = y;
 }
@@ -172,7 +175,7 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     for (int y = 0; y < height; y=y+1) {
         for (int x = 0; x < width; x=x+1) {
             double x0, y0;
-            from_screen(&x0, &y0, x, y, width, height, app->zoom);
+            from_screen(&x0, &y0, x, y, width, height, app->zoom, app->zoom_x, app->zoom_y);
  
             guchar* p = pixels + y * rowstride + x * n_channels;
             double it = get_iteration(x0, y0, app);
@@ -200,8 +203,13 @@ static gboolean motion_notify_event_cb(GtkWidget *widget, GdkEventMotion *event,
     int width = gtk_widget_get_allocated_width (widget);
     int height = gtk_widget_get_allocated_height (widget);
     double x, y;
-    from_screen(&x, &y, event->x, event->y, width, height, app->zoom);
+    from_screen(&x, &y, event->x, event->y, width, height, app->zoom, app->zoom_x, app->zoom_y);
     char buf[1024];
+
+    // fixed point
+    app->zoom_x = x;
+    app->zoom_y = y;
+
     snprintf(buf, sizeof(buf), "%.4le + %.4le i", x, y);
     gtk_entry_set_text(GTK_ENTRY(app->entry), buf);
 
@@ -233,6 +241,9 @@ static gboolean reset_button_released_event_cb(GtkWidget *btn, GdkEvent  *event,
     }
     app->t = 0;
     app->julia = 0;
+    app->zoom = 1.0;
+    app->zoom_x = 0.0;
+    app->zoom_y = 0.0;
     create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
     gtk_window_set_title(GTK_WINDOW(app->window), "Mandelbrot");
@@ -293,6 +304,13 @@ zoom_begin_cb (GtkGesture       *gesture,
 }
 
 static void
+zoom_end_cb (GtkGesture       *gesture,
+             GdkEventSequence *sequence,
+             struct App         *app)
+{
+}
+
+static void
 zoom_scale_changed_cb (GtkGestureZoom *z,
                        gdouble         scale,
                        struct App       *app)
@@ -303,6 +321,22 @@ zoom_scale_changed_cb (GtkGestureZoom *z,
         gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
     }
     app->dirty = 1;
+}
+
+static gboolean mouse_scroll (GtkWidget *widget,
+               GdkEvent  *event,
+               struct App       *app)
+{
+    GdkEventScroll * scroll = (GdkEventScroll*) event;
+
+    if (scroll->direction) {
+        app->zoom = app->zoom * 1.1;
+    } else {
+        app->zoom = app->zoom * 0.9;
+    }
+    gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
+
+    return TRUE;  
 }
 
 static void close_window(GtkWidget* widget, struct App* app)
@@ -382,6 +416,7 @@ int main(int argc, char** argv) {
     g_signal_connect(drawing_area, "configure-event", G_CALLBACK(configure_event_cb), &app);
     g_signal_connect(drawing_area, "motion-notify-event", G_CALLBACK(motion_notify_event_cb), &app);
     g_signal_connect(drawing_area, "button-press-event", G_CALLBACK(button_press_event_cb), &app);
+    g_signal_connect(drawing_area, "scroll-event", G_CALLBACK(mouse_scroll), &app); // zoom
     g_signal_connect(button, "button-release-event", G_CALLBACK(reset_button_released_event_cb), &app);
     g_signal_connect(button2, "button-release-event", G_CALLBACK(run_button_released_event_cb), &app);
 
@@ -389,7 +424,8 @@ int main(int argc, char** argv) {
 
     g_signal_connect(zoom, "begin", G_CALLBACK(zoom_begin_cb), &app);
     g_signal_connect(zoom, "scale-changed", G_CALLBACK(zoom_scale_changed_cb), &app);
-
+    g_signal_connect(zoom, "end", G_CALLBACK(zoom_end_cb), &app);
+    
     gtk_widget_show_all (window);
 
     gtk_main();
