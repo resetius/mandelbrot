@@ -334,6 +334,7 @@ static gboolean mouse_scroll (GtkWidget *widget,
     } else {
         app->zoom = app->zoom * 0.9;
     }
+    create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
 
     return TRUE;  
