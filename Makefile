@@ -15,7 +15,7 @@ endif
 
 COMPILER ?= $(CC)
 
-All: mandelbrot.exe mandelbulb.exe julia.exe
+All: mandelbrot_bigfloat.exe mandelbrot.exe mandelbulb.exe julia.exe
 
 clean:
 		rm -f *.o *.exe 
@@ -28,3 +28,7 @@ mandelbulb.exe: mandelbulb_gui.o mandelbulb.o
 
 %.o: %.c Makefile
 		$(COMPILER) -g -Wall $(CFLAGS) `pkg-config --cflags gtk+-3.0 epoxy` -c $< -o $@
+
+%.o: %.cpp Makefile
+		$(COMPILER) -g -Wall -std=c++20 $(CFLAGS) `pkg-config --cflags gtk+-3.0 epoxy` -c $< -o $@
+
