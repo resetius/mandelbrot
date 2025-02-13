@@ -56,6 +56,9 @@ public:
         std::vector<uint8_t> buffer;
         std::vector<int> iterations;
         int frame = 0;
+        double prev_min_iterations = 0;
+        double prev_max_iterations = 0;
+        double alpha = 0.2;
         while (true) {
             std::string filename = "frame_" + std::to_string(frame) + ".dat";
             std::string filenamePng = "frame_" + std::to_string(frame) + ".png";
@@ -69,14 +72,22 @@ public:
             buffer.resize(width*height*3);
             iterations.resize(width*height);
             fread(iterations.data(), sizeof(int), width*height, f);
-            int min_iterations = *std::min_element(iterations.begin(), iterations.end());
-            int max_iterations = *std::max_element(iterations.begin(), iterations.end());
+            double min_iterations = *std::min_element(iterations.begin(), iterations.end());
+            double max_iterations = *std::max_element(iterations.begin(), iterations.end());
             std::cerr << min_iterations << " " << max_iterations << "\n";
+            double effective_min_iterations = min_iterations;
+            double effective_max_iterations = max_iterations;
+            if (prev_min_iterations > 0) {
+                effective_min_iterations = alpha * effective_min_iterations + (1.0 - alpha) * prev_min_iterations;
+                effective_max_iterations = alpha * effective_max_iterations + (1.0 - alpha) * prev_max_iterations;
+            }
+            prev_min_iterations = effective_min_iterations;
+            prev_max_iterations = effective_max_iterations;
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
                     int iter = iterations[y * width + x];
 
-                    double hue = (double)(iter-min_iterations) / (max_iterations-min_iterations);
+                    double hue = (double)(iter-effective_min_iterations) / (effective_max_iterations-effective_min_iterations);
                     int idx = (y * width + x) * 3;
 
                     // HSV to RGB преобразование для более интересной визуализации

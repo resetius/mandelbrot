@@ -3,6 +3,8 @@
 #include <string>
 #include <cmath>
 #include <chrono>
+#include <map>
+#include <random>
 
 #include "big_float.h"
 
@@ -14,6 +16,9 @@ private:
     int frame = 0;
     T center_x, center_y, view_width;
     T eps = 1.0;
+    std::random_device rd;
+    std::mt19937 gen;
+    std::uniform_real_distribution<double> dist;
 
     void write_iterations(const std::vector<int>& buffer, const std::string& filename) {
         FILE* fp = fopen(filename.c_str(), "wb");
@@ -32,9 +37,8 @@ private:
         double _1_w = 1.0 / width;
         double _1_h = 1.0 / height;
 
-        double max_score = 0;
-        int best_x = center_x;
-        int best_y = center_y;
+        std::multimap<double,std::pair<int,int>> top_scores;
+        int scores = 10;
 
         // Преобразование экранных координат в координаты комплексной плоскости
         T pixel_width = view_width * T(_1_w);
@@ -69,13 +73,26 @@ private:
                 ) / search_radius;
                 score *= (1.0 - 0.3 * distance_penalty);
 
-                if (score > max_score) {
-                    max_score = score;
-                    best_x = x;
-                    best_y = y;
+                top_scores.insert(std::make_pair(score, std::make_pair(x, y)));
+
+                if ((int)top_scores.size() > scores) {
+                    top_scores.erase(top_scores.begin());
                 }
             }
         }
+
+        double r = dist(gen);  // равномерное число в [0,1)
+        double exponent = 2.0;
+        int n = (int)top_scores.size();
+
+        // Вычисляем индекс с bias:
+        // При r = 0 получим index = n-1 (конец), при r = 1 — index = 0 (начало)
+        size_t index = static_cast<size_t>( std::floor( (n - 1) - std::pow(r, exponent) * (n - 1) ) );
+
+        // Итерация к нужному элементу (multimap не поддерживает random access)
+        auto it = top_scores.begin();
+        std::advance(it, index);
+        auto [best_x, best_y] = it->second;
 
         // Преобразуем экранные координаты в координаты множества Мандельброта
         T new_x = this->center_x + T(best_x - width/2) * pixel_width;
@@ -89,7 +106,8 @@ public:
         int w, int h, int max_iter,
         T center_x = -0.75, T center_y = 0, T view_width = 4.0)
         : width(w), height(h), max_iterations(max_iter),
-          center_x(center_x), center_y(center_y), view_width(view_width)
+          center_x(center_x), center_y(center_y), view_width(view_width),
+          gen(rd()), dist(0.0, 1.0)
     {
         T one(1.0);
         while (one + eps > one) {
@@ -139,8 +157,10 @@ public:
             center_y = new_y;
 
             // Уменьшаем ширину обзора вдвое
-            view_width = view_width * T(0.5);
-            max_iterations += 10;
+            //view_width = view_width * T(0.5);
+            view_width = view_width * T(1.0/1.5);
+            //max_iterations += 10;
+            max_iterations += 2;
 
             if (view_width < eps) {
                 std::cerr << "stop on eps: " << (double)eps << "\n";
@@ -179,10 +199,11 @@ int main() {
     //MandelbrotRenderer<BigFloat<2,uint64_t>> renderer(1920, 1080, 100);
     //MandelbrotRenderer<BigFloat<1,uint64_t>> renderer(1920, 1080, 100);
 
-    int frames = 200;
+    //int frames = 200;
     //int max_iterations = 100;
     //int frames = 10;
-    int max_iterations = 100;
+    int frames = 1000;
+    int max_iterations = 50; //100;
     MandelbrotRenderer<double> renderer1(1920, 1080, max_iterations);
     renderer1.render_animation(0, frames);
     auto [x1, y1, v1, frame1, its1] = renderer1.get_parameters();
