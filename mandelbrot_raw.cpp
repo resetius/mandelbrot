@@ -1,6 +1,7 @@
 #include <vector>
 #include <cstdint>
 #include <string>
+#include <cstring>
 #include <cmath>
 #include <chrono>
 #include <map>
@@ -177,7 +178,7 @@ public:
             //view_width = view_width * T(0.5);
             view_width = view_width * T(1.0/1.5);
             //max_iterations += 10;
-            max_iterations += 2;
+            max_iterations += 1;
 
             if (view_width < eps) {
                 std::cerr << "stop on eps: " << (double)eps << "\n";
@@ -208,57 +209,317 @@ public:
 
 };
 
-int main() {
-    //MandelbrotRenderer<double> renderer(800, 600, 100);
-    //MandelbrotRenderer<BigFloat<2,uint64_t>> renderer(800, 600, 100);
-    //renderer.render_animation(300);
-    //MandelbrotRenderer<_Float128> renderer(1920, 1080, 100);
-    //MandelbrotRenderer<BigFloat<2,uint64_t>> renderer(1920, 1080, 100);
-    //MandelbrotRenderer<BigFloat<1,uint64_t>> renderer(1920, 1080, 100);
+constexpr int MAX_PRECISION = 32;
 
-    //int frames = 200;
-    //int max_iterations = 100;
-    //int frames = 10;
-    int frames = 500; //1000;
-    int max_iterations = 50; //100;
-    MandelbrotRenderer<double> renderer1(1920, 1080, max_iterations);
-    renderer1.render_animation(0, frames);
-    auto [x1, y1, v1, frame1, its1] = renderer1.get_parameters();
+template <int Precision>
+struct RenderType {
+    using type = BigFloat<Precision, uint64_t>;
+};
 
-    if (frame1 < frames) {
-        MandelbrotRenderer<BigFloat<1,uint64_t>> renderer2(1920, 1080, its1, x1, y1, v1);
-        renderer2.render_animation(frame1, frames);
-        auto [x2, y2, v2, frame2, its2] = renderer2.get_parameters();
+template <>
+struct RenderType<0> {
+    using type = double;
+};
 
-        if (frame2 < frames) {
-            MandelbrotRenderer<BigFloat<2,uint64_t>> renderer3(1920, 1080, its2, x2, y2, v2);
-            renderer3.render_animation(frame2, frames);
-            auto [x3, y3, v3, frame3, its3] = renderer3.get_parameters();
+template <int Precision>
+void render_recursive(int width, int height, int frames,
+                      int current_frame, int max_iterations,
+                      const typename RenderType<Precision>::type& center_x,
+                      const typename RenderType<Precision>::type& center_y,
+                      const typename RenderType<Precision>::type& view_width)
+{
+    using T = typename RenderType<Precision>::type;
+    MandelbrotRenderer<T> renderer(width, height, max_iterations, center_x, center_y, view_width);
+    renderer.render_animation(current_frame, frames);
+    auto [nx, ny, nv, nframe, nits] = renderer.get_parameters();
 
-            if (frame3 < frames) {
-                MandelbrotRenderer<BigFloat<3,uint64_t>> renderer4(1920, 1080, its3, x3, y3, v3);
-                renderer4.render_animation(frame3, frames);
-                auto [x4, y4, v4, frame4, its4] = renderer4.get_parameters();
-
-                if (frame4 < frames) {
-                    MandelbrotRenderer<BigFloat<4,uint64_t>> renderer5(1920, 1080, its4, x4, y4, v4);
-                    renderer5.render_animation(frame4, frames);
-                    auto [x5, y5, v5, frame5, its5] = renderer5.get_parameters();
-
-                    if (frame5 < frames) {
-                        MandelbrotRenderer<BigFloat<5,uint64_t>> renderer6(1920, 1080, its5, x5, y5, v5);
-                        renderer6.render_animation(frame5, frames);
-                        auto [x6, y6, v6, frame6, its6] = renderer6.get_parameters();
-
-                        if (frame6 < frames) {
-                            MandelbrotRenderer<BigFloat<6,uint64_t>> renderer7(1920, 1080, its6, x6, y6, v6);
-                            renderer7.render_animation(frame6, frames);
-                            auto [x7, y7, v7, frame7, its7] = renderer7.get_parameters();
-                        }
-                    }
-                }
-            }
+    if (nframe < frames) {
+        if constexpr (Precision < MAX_PRECISION) {
+            render_recursive<Precision + 1>(width, height, frames, nframe, nits, nx, ny, nv);
+        } else {
+            std::cerr << "Maximum Precision reached: "
+                << Precision << ", frames left "
+                << nframe << " of " << frames << std::endl;
         }
+    }
+}
+
+void render_continue(const std::string& fn, int frames) {
+    // fn must be like `frame_number.dat`
+    FILE* fp = fopen(fn.c_str(), "rb");
+    if (!fp) {
+        std::cerr << "Cannot open file " << fn << "\n";
+        return;
+    }
+    size_t prefix_pos = fn.find("frame_");
+    if (prefix_pos == std::string::npos) {
+        std::cerr << "Filename " << fn << " does not contain 'frame_'\n";
+        fclose(fp);
+        return;
+    }
+    prefix_pos += 6; // len of "frame_"
+    size_t dot_pos = fn.find('.', prefix_pos);
+    if (dot_pos == std::string::npos) {
+        std::cerr << "Filename " << fn << " has no extension separator\n";
+        fclose(fp);
+        return;
+    }
+    std::string frame_number_str = fn.substr(prefix_pos, dot_pos - prefix_pos);
+    int frameno = 0;
+    try {
+        frameno = std::stoi(frame_number_str);
+    } catch (const std::exception& e) {
+        std::cerr << "Cannot parse frame number from filename " << fn << "\n";
+        fclose(fp);
+        return;
+    }
+
+    int width;
+    int height;
+    fread(&width, sizeof(width), 1, fp);
+    fread(&height, sizeof(height), 1, fp);
+    std::vector<int> iterations;
+    iterations.resize(width*height);
+    fread(iterations.data(), sizeof(int), width*height, fp);
+    int max_iterations = *std::max_element(iterations.begin(), iterations.end());
+    int blocks = 0;
+    fread(&blocks, sizeof(blocks), 1, fp);
+    if (blocks == 0) {
+        double center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading double parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<0>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 1) {
+        BigFloat<1, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<1,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<1>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 2) {
+        BigFloat<2, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<2,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<2>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 3) {
+        BigFloat<3, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<3,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<3>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 4) {
+        BigFloat<4, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<4,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<4>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 5) {
+        BigFloat<5, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<5,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<5>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 6) {
+        BigFloat<6, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<6,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<6>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 7) {
+        BigFloat<7, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<7,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<7>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 8) {
+        BigFloat<8, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<8,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<8>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 9) {
+        BigFloat<9, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<9,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<9>(width, height, frames, frameno,
+                            max_iterations,
+                            center_x, center_y, view_width);
+    } else if (blocks == 10) {
+        BigFloat<10, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<10,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<10>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else if (blocks == 11) {
+        BigFloat<11, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<11,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<11>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else if (blocks == 12) {
+        BigFloat<12, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<12,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<12>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else if (blocks == 13) {
+        BigFloat<13, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<13,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<13>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else if (blocks == 14) {
+        BigFloat<14, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<14,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<14>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else if (blocks == 15) {
+        BigFloat<15, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<15,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<15>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else if (blocks == 16) {
+        BigFloat<16, uint64_t> center_x, center_y, view_width;
+        if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
+            fread(&center_y, sizeof(center_y), 1, fp) != 1 ||
+            fread(&view_width, sizeof(view_width), 1, fp) != 1) {
+            std::cerr << "Error reading BigFloat<16,uint64_t> parameters\n";
+            fclose(fp);
+            return;
+        }
+        render_recursive<16>(width, height, frames, frameno,
+                             max_iterations,
+                             center_x, center_y, view_width);
+    } else {
+        std::cerr << "Unsupported blocks value: " << blocks << "\n";
+    }
+
+    fclose(fp);
+}
+
+int main(int argc, char** argv) {
+    int frames = 20; //1000;
+    int max_iterations = 50; //100;
+    int width = 1920;
+    int height = 1080;
+    std::string restore_point;
+
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--width") && i < argc-1) {
+            width = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--height") && i < argc-1) {
+            height = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--frames") && i < argc-1) {
+            frames = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--max_iterations") && i < argc-1) {
+            max_iterations = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--restore") && i < argc-1) {
+            restore_point = argv[++i];
+        }
+    }
+
+    if (!restore_point.empty()) {
+        render_continue(restore_point, frames);
+    } else {
+        render_recursive<0>(width, height, frames, 0, max_iterations, -0.75, 0, 4.0);
     }
 
     return 0;
