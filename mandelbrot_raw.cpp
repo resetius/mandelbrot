@@ -26,6 +26,15 @@ private:
         fwrite(&width, sizeof(width), 1, fp);
         fwrite(&height, sizeof(height), 1, fp);
         fwrite(buffer.data(), sizeof(int), buffer.size(), fp);
+        int blocks = 0;
+        if constexpr(!std::is_same_v<T,double>) {
+            T tmp;
+            blocks = tmp.getMantissa().size();
+        }
+        fwrite(&blocks, sizeof(blocks), 1, fp);
+        fwrite(&center_x, sizeof(center_x), 1, fp);
+        fwrite(&center_y, sizeof(center_y), 1, fp);
+        fwrite(&view_width, sizeof(view_width), 1, fp);
         fclose(fp);
     }
 
@@ -51,6 +60,7 @@ private:
                 // Проверяем окрестность точки
                 int black_count = 0;
                 int colored_count = 0;
+                int total_count = 0;
 
                 for (int dy = -2; dy <= 2; dy++) {
                     for (int dx = -2; dx <= 2; dx++) {
@@ -60,11 +70,18 @@ private:
                         } else {
                             colored_count++;
                         }
+                        total_count ++;
                     }
                 }
 
                 // Ищем области на границе множества
-                double score = black_count * colored_count;
+                // double score = black_count * (total_count-colored_count);
+                //double score = colored_count == 0
+                //    ? 0
+                //    : (double)black_count / (double)colored_count;
+                double score = black_count == 0
+                    ? 0
+                    : (double)colored_count / (double)black_count;
 
                 // Штраф за удаление от текущего центра
                 double distance_penalty = std::sqrt(
@@ -202,7 +219,7 @@ int main() {
     //int frames = 200;
     //int max_iterations = 100;
     //int frames = 10;
-    int frames = 1000;
+    int frames = 500; //1000;
     int max_iterations = 50; //100;
     MandelbrotRenderer<double> renderer1(1920, 1080, max_iterations);
     renderer1.render_animation(0, frames);
