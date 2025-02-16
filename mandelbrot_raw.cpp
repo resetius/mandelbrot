@@ -191,17 +191,18 @@ public:
         T x = 0;
         T y = 0;
         T xn;
+        T x2=x*x, y2=y*y;
+        T _4 = T(4);
         int i;
-        for (i = 1; i < max_iterations && x*x+y*y < 4; i=i+1) {
+        for (i = 1; i < max_iterations && x2+y2 < _4; i=i+1) {
+            x2=x*x; y2=y*y;
+            xn = x2 - y2 + x0;
             if constexpr(std::is_same_v<T,double> || std::is_same_v<T,_Float128>) {
-                xn = x*x - y*y + x0;
                 y = T(2.0)*x*y + y0;
-                x = xn;
             } else {
-                xn = x*x - y*y + x0;
                 y = (x*y).Mul2() + y0;
-                x = xn;
             }
+            x = xn;
         }
 
         return i;
@@ -284,6 +285,11 @@ void render_continue(const std::string& fn, int frames) {
     int max_iterations = *std::max_element(iterations.begin(), iterations.end());
     int blocks = 0;
     fread(&blocks, sizeof(blocks), 1, fp);
+
+    std::cerr << "Run from checkpoint: "
+        << width << " " << height << " " << max_iterations << " "
+        << blocks << "\n";
+
     if (blocks == 0) {
         double center_x, center_y, view_width;
         if (fread(&center_x, sizeof(center_x), 1, fp) != 1 ||
