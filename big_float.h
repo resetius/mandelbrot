@@ -137,6 +137,23 @@ static inline unsigned char addcarry_u64(uint64_t a, uint64_t b, uint64_t* sum) 
     return carry_out;
 }
 
+static inline unsigned char subborrow_u64(unsigned char borrow, uint64_t a, uint64_t b, uint64_t* diff) {
+    uint64_t res;
+    unsigned int outBorrow;
+    asm volatile(
+        "mov    w10, #1           \n"
+        "sub    w10, w10, %w[br]   \n"
+        "cmp    w10, #1           \n"
+        "sbcs   %x[res], %x[a], %x[b] \n"
+        "cset   %w[ob], cc        \n"
+        : [res] "=&r" (res), [ob] "=&r" (outBorrow)
+        : [a] "r" (a), [b] "r" (b), [br] "r" ((unsigned int)borrow)
+        : "w10", "cc"
+    );
+    *diff = res;
+    return (unsigned char) outBorrow;
+}
+
 #endif
 
 } // detail
@@ -160,7 +177,7 @@ public:
         }
 
         uint64_t bits = val.u;
-        sign = (bits >> 63) & 0x1;
+        sign = ((bits >> 63) & 0x1) == 0 ? 1 : -1;
 
         int exponent_raw = (bits >> 52) & 0x7FF;
         exponent = exponent_raw - 1023;
@@ -184,7 +201,7 @@ public:
         if (number == 0) {
             return;
         }
-        sign = number < 0;
+        sign = (number < 0) ? -1 : 1;
         uint64_t value = std::abs(number);
         if constexpr(std::is_same_v<BlockType, uint64_t>) {
             mantissa[blocks-1] = value;
@@ -234,24 +251,24 @@ public:
 
     BigFloat operator-() const {
         BigFloat result = *this;
-        result.sign = !result.sign;
+        result.sign = -result.sign;
         return result;
     }
 
     bool operator<(const BigFloat& other) const {
         if (IsZero()) {
-            return !other.sign;
+            return other.sign == 1;
         }
 
         if (other.IsZero()) {
-            return sign;
+            return sign == -1;
         }
 
         if (sign != other.sign) {
-            return sign;
+            return sign < other.sign;
         }
 
-        if (sign) {
+        if (sign == -1) {
             return -other < -*this;
         }
 
@@ -301,7 +318,7 @@ public:
         }
         mantissa_raw >>= 63-52;
         val.u |= mantissa_raw & 0xFFFFFFFFFFFFFULL;
-        val.u |= static_cast<uint64_t>(sign) << 63;
+        val.u |= sign == -1 ? static_cast<uint64_t>(1) << 63 : 0;
 
         return val.d;
     }
@@ -310,9 +327,9 @@ public:
         BigFloat result;
 
         size_t pos = 0;
-        bool sign = false;
+        int sign = 1;
         if (str[0] == '-') {
-            sign = true;
+            sign = -1;
             pos++;
         }
 
@@ -339,7 +356,9 @@ public:
             result = result + frac;
         }
 
-        result.sign = sign;
+        if (!result.IsZero()) {
+            result.sign = sign;
+        }
 
         return result;
     }
@@ -347,7 +366,7 @@ public:
     std::string ToString() const {
         std::string result;
 
-        if (sign) {
+        if (sign == -1) {
             result += "-";
         }
 
@@ -431,7 +450,7 @@ public:
 
         if (sign != other.sign) {
             BigFloat temp = other;
-            temp.sign = !temp.sign;
+            temp.sign = -temp.sign;
             return *this - temp;
         }
 
@@ -469,13 +488,13 @@ public:
         }
         if (IsZero()) {
             BigFloat result = other;
-            result.sign = !result.sign;
+            result.sign = -result.sign;
             return result;
         }
 
         if (sign != other.sign) {
             BigFloat temp = other;
-            temp.sign = !temp.sign;
+            temp.sign = -temp.sign;
             return *this + temp;
         }
 
@@ -508,7 +527,7 @@ public:
         subWithBorrow(result.mantissa, a.mantissa, b.mantissa);
 
         result.exponent = a.exponent;
-        result.sign = swapped ? !sign : sign;
+        result.sign = swapped ? -sign : sign;
 
         result.normalize();
         return result;
@@ -517,25 +536,6 @@ public:
     BigFloat Mul2() const {
         BigFloat result = *this;
         result.exponent++;
-        return result;
-    }
-
-    BigFloat Square() const {
-        if (IsZero()) {
-            return {};
-        }
-
-        BigFloat result;
-
-        result.exponent = 2 * exponent + blocks * blockBits;
-
-        std::array<BlockType, blocks * 2> temp{0};
-        square(temp, mantissa);
-
-        normalize(temp, result.exponent);
-        for (size_t i = 0; i < blocks; ++i) {
-            result.mantissa[i] = temp[i + blocks];
-        }
         return result;
     }
 
@@ -555,7 +555,7 @@ public:
         for (size_t i = 0; i < blocks; ++i) {
             result.mantissa[i] = temp[i + blocks];
         }
-        result.sign = sign != other.sign;
+        result.sign = sign * other.sign;
         return result;
     }
 
@@ -577,24 +577,33 @@ private:
 
     std::array<BlockType, blocks> mantissa = {0};
     int32_t exponent = 0;
-    bool sign = false;
+    int sign = 0; // -1 negitive, 0 zero, 1 positive
     static constexpr int blockBits = sizeof(BlockType) * 8;
     static_assert(std::is_same_v<BlockType,uint64_t> || blocks > 1, "blocks must be greater than 1");
     static_assert(std::is_same_v<BlockType,uint64_t> || std::is_same_v<BlockType,uint32_t>);
 
     bool IsZero() const {
-        return IsZero(mantissa);
+        return sign == 0;
     }
-
+/*
     template<size_t array_blocks>
     static bool IsZero(const std::array<BlockType, array_blocks>& array) {
-        return array == std::array<BlockType, array_blocks>{0};
+        for (size_t i = array_blocks - 1; i >= 0; --i) {
+            if (array[i] != 0) {
+                return false;
+            }
+        }
+        return true;
     }
-
+*/
     static BigFloat IntFromString(const std::string& intPart) {
         BigFloat result;
 
         uint64_t value = std::stoll(intPart);
+        if (value == 0) {
+            return {};
+        }
+        result.sign = 1;
         // TODO: handle overflow
 
         if constexpr(std::is_same_v<BlockType,uint32_t>) {
@@ -638,6 +647,11 @@ private:
             }
         }
 
+        if (result.mantissa == std::array<BlockType,blocks>{}) {
+            return {};
+        }
+
+        result.sign = 1;
         result.normalize();
 
         return result;
@@ -702,7 +716,7 @@ private:
         const std::array<BlockType, blocks>& a,
         const std::array<BlockType, blocks>& b)
     {
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
         constexpr bool use_asm = std::is_same_v<BlockType, uint64_t>;
 #else
         constexpr bool use_asm = false;
@@ -731,7 +745,7 @@ private:
     {
         for (size_t i = 0; i < blocks; ++i)
         {
-            WideType carry = 0;
+            BlockType carry = 0;
 
             for (size_t j = 0; j < blocks; ++j) {
                 size_t pos = i + j;
@@ -750,48 +764,13 @@ private:
         }
     }
 
-    static void square(std::array<BlockType, 2*blocks>& result,
-                    const std::array<BlockType, blocks>& a)
-    {
-        for (size_t i = 0; i < blocks; ++i) {
-            WideType carry = 0;
-            for (size_t j = i + 1; j < blocks; ++j) {
-                size_t pos = i + j;
-
-                WideType prod = static_cast<WideType>(a[i]) * static_cast<WideType>(a[j]);
-                prod <<= 1;  // prod *= 2;
-
-                WideType sum = static_cast<WideType>(result[pos]) + prod + carry;
-                result[pos] = static_cast<BlockType>(sum);
-                carry = sum >> blockBits;
-            }
-            result[i + blocks] += static_cast<BlockType>(carry);
-        }
-
-        for (size_t i = 0; i < blocks; ++i) {
-            size_t pos = 2 * i;
-            WideType prod = static_cast<WideType>(a[i]) * static_cast<WideType>(a[i]);
-            WideType sum = static_cast<WideType>(result[pos]) + prod;
-            result[pos] = static_cast<BlockType>(sum);
-            WideType carry = sum >> blockBits;
-
-            size_t k = pos + 1;
-            while (carry && k < result.size()) {
-                sum = static_cast<WideType>(result[k]) + carry;
-                result[k] = static_cast<BlockType>(sum);
-                carry = sum >> blockBits;
-                ++k;
-            }
-        }
-    }
-
     bool isNormalized() const {
-        return isNormalized(mantissa);
+        return IsZero() || isNormalized(mantissa);
     }
 
     template<size_t array_blocks>
     static bool isNormalized(const std::array<BlockType, array_blocks>& array) {
-        return (array.back() & ((BlockType)1U << (blockBits-1))) != 0 || IsZero(array);
+        return (array.back() & ((BlockType)1U << (blockBits-1))) != 0;
     }
 
     template<size_t array_blocks>
@@ -814,12 +793,13 @@ private:
             }
         }
 
-        BlockType mask = (1ULL << bitShift) - 1ULL;
-
-        for (size_t i = blockShift; i < array_blocks; ++i) {
-            BlockType next_carry = (mantissa[i] & (mask << (blockBits - bitShift))) >> (blockBits - bitShift);
-            mantissa[i] = (mantissa[i] << bitShift) | carry;
-            carry = next_carry;
+        if (bitShift > 0) {
+            BlockType mask = (1ULL << bitShift) - 1ULL;
+            for (size_t i = blockShift; i < array_blocks; ++i) {
+                BlockType next_carry = (mantissa[i] & (mask << (blockBits - bitShift))) >> (blockBits - bitShift);
+                mantissa[i] = (mantissa[i] << bitShift) | carry;
+                carry = next_carry;
+            }
         }
     }
 
@@ -842,12 +822,13 @@ private:
             }
         }
 
-        BlockType mask = (1ULL << bitShift) - 1ULL;
-
-        for (int i = blocks - blockShift - 1; i >= 0; --i) {
-            BlockType next_carry = mantissa[i] & mask;
-            mantissa[i] = (mantissa[i] >> bitShift) | (carry << (blockBits - bitShift));
-            carry = next_carry;
+        if (bitShift > 0) {
+            BlockType mask = (1ULL << bitShift) - 1ULL;
+            for (int i = blocks - blockShift - 1; i >= 0; --i) {
+                BlockType next_carry = mantissa[i] & mask;
+                mantissa[i] = (mantissa[i] >> bitShift) | (carry << (blockBits - bitShift));
+                carry = next_carry;
+            }
         }
     }
 
