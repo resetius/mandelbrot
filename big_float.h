@@ -276,13 +276,7 @@ public:
             return exponent < other.exponent;
         }
 
-        for (int i = 0; i < blocks; i++) {
-            if (mantissa[i] != other.mantissa[i]) {
-                return mantissa[i] < other.mantissa[i];
-            }
-        }
-
-        return false;
+        return less(mantissa, other.mantissa);
     }
 
     bool operator>(const BigFloat& other) const {
@@ -404,7 +398,7 @@ public:
 
             int32_t effectiveExp = exponent + (blocks*blockBits-1);
 
-            while (value != std::array<BlockType,blocks>{} && fracPart.size() < 18) {
+            while (!IsZero(value) && fracPart.size() < 18) {
                 carry = 0;
 
                 for (size_t i = 0; i < value.size(); i++) {
@@ -436,101 +430,94 @@ public:
     }
 
     BigFloat& operator+=(const BigFloat& other) {
-        *this = *this + other;
+        if (other.IsZero()) {
+            return *this;
+        }
+        if (IsZero()) {
+            return (*this = other);
+        }
+
+        if (sign != other.sign) {
+            BigFloat temp = other;
+            temp.sign = -temp.sign;
+            return (*this -= temp);
+        }
+
+        auto exp_diff = exponent - other.exponent;
+        BlockType carry = 0;
+
+        if (exp_diff > 0) {
+            BigFloat b = other;
+            shiftMantissaRight(b.mantissa, exp_diff);
+            carry = sumWithCarry(mantissa, mantissa, b.mantissa);
+        } else if (exp_diff < 0) {
+            shiftMantissaRight(mantissa, -exp_diff);
+            exponent -= exp_diff;
+            carry = sumWithCarry(mantissa, mantissa, other.mantissa);
+        } else {
+            carry = sumWithCarry(mantissa, mantissa, other.mantissa);
+        }
+
+        if (carry) {
+            shiftMantissaRight(mantissa);
+            mantissa[blocks-1] |= carry << (blockBits - 1);
+            exponent++;
+        }
+
+        normalize();
         return *this;
     }
 
     BigFloat operator+(const BigFloat& other) const {
+        BigFloat result = *this;
+        return (result += other);
+    }
+
+    BigFloat& operator-=(const BigFloat& other) {
         if (other.IsZero()) {
             return *this;
         }
         if (IsZero()) {
-            return other;
+            return (*this = other);
         }
 
         if (sign != other.sign) {
             BigFloat temp = other;
             temp.sign = -temp.sign;
-            return *this - temp;
+            return (*this += temp);
         }
 
-        BigFloat result;
         auto exp_diff = exponent - other.exponent;
 
-        BigFloat a = *this;
-        BigFloat b = other;
+        auto sub = [&](const BigFloat* a, const BigFloat* b) {
+            if (less(a->mantissa, b->mantissa)) {
+                std::swap(a, b);
+                sign = -sign;
+            }
+            subWithBorrow(mantissa, a->mantissa, b->mantissa);
+            exponent = a->exponent;
+        };
 
         if (exp_diff > 0) {
+            BigFloat b = other;
             shiftMantissaRight(b.mantissa, exp_diff);
             b.exponent += exp_diff;
+            sub(this, &b);
         } else if (exp_diff < 0) {
-            shiftMantissaRight(a.mantissa, -exp_diff);
-            a.exponent -= exp_diff;
+            shiftMantissaRight(mantissa, -exp_diff);
+            exponent -= exp_diff;
+            sub(this, &other);
+        } else {
+            sub(this, &other);
         }
 
-        auto carry = sumWithCarry(result.mantissa, a.mantissa, b.mantissa);
-        result.exponent = a.exponent;
-        result.sign = sign;
-
-        if (carry) {
-            shiftMantissaRight(result.mantissa);
-            result.mantissa[blocks-1] |= carry << (blockBits - 1);
-            result.exponent++;
-        }
-
-        result.normalize();
-        return result;
+        normalize();
+        return *this;
     }
 
     BigFloat operator-(const BigFloat& other) const {
-        if (other.IsZero()) {
-            return *this;
-        }
-        if (IsZero()) {
-            BigFloat result = other;
-            result.sign = -result.sign;
-            return result;
-        }
-
-        if (sign != other.sign) {
-            BigFloat temp = other;
-            temp.sign = -temp.sign;
-            return *this + temp;
-        }
-
-        BigFloat result;
-        auto exp_diff = exponent - other.exponent;
-
-        BigFloat a = *this;
-        BigFloat b = other;
-
-        if (exp_diff > 0) {
-            shiftMantissaRight(b.mantissa, exp_diff);
-            b.exponent += exp_diff;
-        } else if (exp_diff < 0) {
-            shiftMantissaRight(a.mantissa, -exp_diff);
-            a.exponent -= exp_diff;
-        }
-
-        bool swapped = false;
-        for (int i = blocks - 1; i >= 0; --i) {
-            if (a.mantissa[i] < b.mantissa[i]) {
-                std::swap(a, b);
-                swapped = true;
-                break;
-            }
-            if (a.mantissa[i] > b.mantissa[i]) {
-                break;
-            }
-        }
-
-        subWithBorrow(result.mantissa, a.mantissa, b.mantissa);
-
-        result.exponent = a.exponent;
-        result.sign = swapped ? -sign : sign;
-
-        result.normalize();
-        return result;
+        BigFloat result = *this;
+        return (result -= other);
     }
 
     BigFloat Mul2() const {
@@ -585,17 +572,17 @@ private:
     bool IsZero() const {
         return sign == 0;
     }
-/*
+
     template<size_t array_blocks>
     static bool IsZero(const std::array<BlockType, array_blocks>& array) {
-        for (size_t i = array_blocks - 1; i >= 0; --i) {
+        for (int i = (int)array_blocks - 1; i >= 0; --i) {
             if (array[i] != 0) {
                 return false;
             }
         }
         return true;
     }
-*/
+
     static BigFloat IntFromString(const std::string& intPart) {
         BigFloat result;
 
@@ -647,7 +634,7 @@ private:
             }
         }
 
-        if (result.mantissa == std::array<BlockType,blocks>{}) {
+        if (IsZero(result.mantissa)) {
             return {};
         }
 
@@ -655,6 +642,15 @@ private:
         result.normalize();
 
         return result;
+    }
+
+    static bool less(const std::array<BlockType, blocks>& left, const std::array<BlockType, blocks>& right) {
+        for (int i = blocks-1; i >= 0; --i) {
+            if (left[i] != right[i]) {
+                return left[i] < right[i];
+            }
+        }
+        return false;
     }
 
     void normalize() {
@@ -730,10 +726,11 @@ private:
         } else {
             BlockType borrow = 0;
             for (size_t i = 0; i < blocks; ++i) {
-                BlockType subtrahend = b[i] + borrow;
-                bool overflow = (subtrahend < b[i]);
-                result[i] = a[i] - subtrahend;
-                borrow = (a[i] < subtrahend)  | overflow;
+                BlockType sub = b[i] + borrow;
+                bool overflow = (sub < b[i]);
+                BlockType value = a[i] - sub;
+                borrow = (a[i] < sub)  | overflow;
+                result[i] = value;
             }
         }
     }
@@ -824,11 +821,23 @@ private:
 
         if (bitShift > 0) {
             BlockType mask = (1ULL << bitShift) - 1ULL;
-            for (int i = blocks - blockShift - 1; i >= 0; --i) {
-                BlockType next_carry = mantissa[i] & mask;
-                mantissa[i] = (mantissa[i] >> bitShift) | (carry << (blockBits - bitShift));
-                carry = next_carry;
+            int i;
+            for (i = 0; i < blocks - blockShift - 1; i++) {
+                carry = mantissa[i+1] & mask;
+                if constexpr(std::is_same_v<BlockType,uint64_t>) {
+#ifdef __x86_64__
+                    asm volatile ("shrd %2, %1, %0"
+                        : "+r" (mantissa[i])
+                        : "r" (carry), "c" ((unsigned char)bitShift)
+                    );
+#else
+                    mantissa[i] = (mantissa[i] >> bitShift) | (carry << (blockBits - bitShift));
+#endif
+                } else {
+                    mantissa[i] = (mantissa[i] >> bitShift) | (carry << (blockBits - bitShift));
+                }
             }
+            mantissa[i] >>= bitShift;
         }
     }
 
