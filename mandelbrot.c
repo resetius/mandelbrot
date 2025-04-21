@@ -106,6 +106,14 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *y0 = y1 - y2 + zoom_y;
 }
 
+static double clamp01(double x) { 
+    return x<0
+        ? 0
+        : (x > 1
+            ? 1
+            :x); 
+}
+
 static void hsv2rgb(guchar* rgb, int h, double s, double v) {
     double r[3] = {0};
     int h1 = h/60; h1 %= 6;
@@ -188,15 +196,23 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
     } else {
         get_iteration = get_iteration_mandelbrot;
     }
+    double* H = malloc(width*height*sizeof(double));
 #pragma omp parallel for
     for (int y = 0; y < height; y=y+1) {
         for (int x = 0; x < width; x=x+1) {
             double x0, y0;
             from_screen(&x0, &y0, x, y, width, height, app->zoom, app->zoom_x, app->zoom_y, app->zoom_xx, app->zoom_yy);
- 
-            guchar* p = pixels + y * rowstride + x * n_channels;
-            double it = get_iteration(x0, y0, app);
+            H[y*width+x] = get_iteration(x0, y0, app);
+        }
+    }
 
+    double az=315*M_PI/180.0, el=45*M_PI/180.0;
+    double lx=cos(el)*cos(az), ly=cos(el)*sin(az), lz=sin(el);
+    for (int y = 1; y < height-1; y=y+1) {
+        for (int x = 1; x < width-1; x=x+1) {
+            double it = H[y*width+x];
+            guchar* p = pixels + y * rowstride + x * n_channels;
+#if 0
             if (it < app->max_iteration) {
                 linear_interpolate(p, it, app->max_iteration);
             } else {
@@ -204,8 +220,28 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
                 p[1] = 0;
                 p[2] = 0;
             }
+#endif
+
+            double mu = H[y*width+x];
+            double t  = mu/app->max_iteration;
+            // hillshade: central diffs
+            double hL = H[y*width+(x-1)], hR = H[y*width+(x+1)];
+            double hD = H[(y-1)*width+x], hU = H[(y+1)*width+x];
+            double ddx = (hR - hL)*0.5, ddy = (hU - hD)*0.5;
+            // normal
+            double nx=-ddx, ny=-ddy, nz=1;
+            double inv = 1.0/sqrt(nx*nx+ny*ny+nz*nz);
+            nx*=inv; ny*=inv; nz*=inv;
+            double shade = clamp01(nx*lx + ny*ly + nz*lz);
+
+            // HSV: hue = full cycle, sat constant, val = shade
+            double Hh = 360.0 * t;
+            double S = 1.0;
+            double V = shade;
+            hsv2rgb(p, Hh, S, V);
         }
     }
+    free(H);
     app->pixbuf = pixbuf;
 }
 
