@@ -1,5 +1,5 @@
 /**
- * Mandelbrot and Julia sets 
+ * Mandelbrot and Julia sets
  * Copyright (c) 2021, Alexey Ozeritskiy
  */
 
@@ -90,7 +90,7 @@ static void from_screen_(double* x0, double* y0, double screen_x, double screen_
     } else {
         y -= 0.5*d;
     }
-    x = x * zoom + zoom_x - zoom_x * zoom; 
+    x = x * zoom + zoom_x - zoom_x * zoom;
     y = y * zoom + zoom_y - zoom_y * zoom;
     // TODO: fixed zoom point
     *x0 = x; *y0 = y;
@@ -106,12 +106,12 @@ static void from_screen(double* x0, double* y0, double screen_x, double screen_y
     *y0 = y1 - y2 + zoom_y;
 }
 
-static double clamp01(double x) { 
+static double clamp01(double x) {
     return x<0
         ? 0
         : (x > 1
             ? 1
-            :x); 
+            :x);
 }
 
 static void hsv2rgb(guchar* rgb, int h, double s, double v) {
@@ -197,6 +197,8 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
         get_iteration = get_iteration_mandelbrot;
     }
     double* H = malloc(width*height*sizeof(double));
+    int* hist = calloc((app->max_iteration+1), sizeof(int));
+
 #pragma omp parallel for
     for (int y = 0; y < height; y=y+1) {
         for (int x = 0; x < width; x=x+1) {
@@ -204,6 +206,18 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
             from_screen(&x0, &y0, x, y, width, height, app->zoom, app->zoom_x, app->zoom_y, app->zoom_xx, app->zoom_yy);
             H[y*width+x] = get_iteration(x0, y0, app);
         }
+    }
+    // iter -> percentile
+    int total = 0;
+    for (int y = 0; y < height; y=y+1) {
+        for (int x = 0; x < width; x=x+1) {
+            int iter = H[y*width+x];
+            hist[iter] ++;
+            total ++;
+        }
+    }
+    for (int i = 1; i <= app->max_iteration; i++) {
+        hist[i] += hist[i-1];
     }
 
     double az=315*M_PI/180.0, el=45*M_PI/180.0;
@@ -221,27 +235,67 @@ static void create_pixbuf(GtkWidget *widget, struct App* app)
                 p[2] = 0;
             }
 #endif
+            if (it >= app->max_iteration) {
+                p[0] = 0.0;
+                p[1] = 0.0;
+                p[2] = 0.0;
+                continue;
+            }
 
-            double mu = H[y*width+x];
-            double t  = mu/app->max_iteration;
-            // hillshade: central diffs
-            double hL = H[y*width+(x-1)], hR = H[y*width+(x+1)];
-            double hD = H[(y-1)*width+x], hU = H[(y+1)*width+x];
-            double ddx = (hR - hL)*0.5, ddy = (hU - hD)*0.5;
-            // normal
-            double nx=-ddx, ny=-ddy, nz=1;
-            double inv = 1.0/sqrt(nx*nx+ny*ny+nz*nz);
-            nx*=inv; ny*=inv; nz*=inv;
-            double shade = clamp01(nx*lx + ny*ly + nz*lz);
+#define off(x,y) ((y)*width+(x))
+            double mu = H[off(x,y)];
+            // hillshade
+            double lb = (int)H[off(x-1,y-1)];
+            double b = (int)H[off(x,y-1)];
+            double rb = (int)H[off(x+1,y-1)];
+            double l = (int)H[off(x-1,y)];
+            double r = (int)H[off(x+1,y)];
+            double lt = (int)H[off(x-1,y+1)];
+            double t = (int)H[off(x,y+1)];
+            double rt = (int)H[off(x+1,y+1)];
 
-            // HSV: hue = full cycle, sat constant, val = shade
-            double Hh = 360.0 * t;
-            double S = 1.0;
-            double V = shade;
-            hsv2rgb(p, Hh, S, V);
+            const double z_factor = 10;
+            const double kernelsize = 8;
+            const double azimuth = 135 * M_PI/180;
+            const double altitude = 45 * M_PI/180;
+            const double zenith = M_PI/2 - altitude;
+
+            double dzdx = ((rb + 2*r + rt) - (lb + 2*l + lt)) / kernelsize;
+            double dzdy = ((lt + 2*t + rt) - (lb + 2*b + rb)) / kernelsize;
+
+            double slope = atan(z_factor * sqrt(dzdx*dzdx + dzdy*dzdy));
+            double aspect = atan2(dzdy, -dzdx);
+
+            double shade = ((cos(zenith)*cos(slope)) + (sin(zenith)*sin(slope)*cos(azimuth-aspect)));
+            shade = fmax(0, shade);
+
+            {
+                //double h = 360.0 * mu/app->max_iteration;
+                //h = h + 150;
+                //double frac;
+                //int hi = modf(h, &frac);
+                //hi = hi % 360;
+                //h = hi+frac;
+                //h = fmin(h, 360);
+                int mu_floor = (int)floor(mu);
+                int mu_ceil = (int)ceil(mu);
+                double frac = mu - mu_floor;
+
+                //double a = 360.0 * hist[mu_floor] / (double)total;
+                //double b = 360.0 * hist[mu_ceil] / (double)total;
+                //double c = (1.0-frac)*a + frac*b;
+
+                double perc = hist[mu_floor] / (double)total;
+                double h = 360.0 * perc;// 250*perc*perc;// 360.0 * perc;
+                double s = 1;
+                double v = shade; // (2+shade)/3;
+                hsv2rgb(p, h, s, v);
+            }
+#undef off
         }
     }
     free(H);
+    free(hist);
     app->pixbuf = pixbuf;
 }
 
@@ -393,11 +447,11 @@ static gboolean mouse_scroll (GtkWidget *widget,
     create_pixbuf(GTK_WIDGET (app->drawing_area), app);
     gtk_widget_queue_draw (GTK_WIDGET (app->drawing_area));
 
-    return TRUE;  
+    return TRUE;
 }
 
 static void close_window(GtkWidget* widget, struct App* app)
-{   
+{
     if (app->timer_id > 0)
     {
         g_source_remove(app->timer_id);
@@ -452,7 +506,7 @@ int main(int argc, char** argv) {
     gtk_box_set_child_packing(GTK_BOX(box_right), box_buttons, FALSE, TRUE, 0, GTK_PACK_START);
 
     gtk_widget_set_events(drawing_area,
-                          gtk_widget_get_events(drawing_area) 
+                          gtk_widget_get_events(drawing_area)
                           | GDK_BUTTON_PRESS_MASK | GDK_SCROLL_MASK | GDK_POINTER_MOTION_MASK);
 
     app.window = window;
@@ -462,7 +516,7 @@ int main(int argc, char** argv) {
     app.zoom = 1.0;
     app.zoom_xx = app.zoom_yy = -1;
     app.zoom_initial = 1.0;
-    
+
     /* readonly entry */
     GValue val = G_VALUE_INIT;
     g_value_init(&val, G_TYPE_BOOLEAN);
@@ -483,7 +537,7 @@ int main(int argc, char** argv) {
     g_signal_connect(zoom, "begin", G_CALLBACK(zoom_begin_cb), &app);
     g_signal_connect(zoom, "scale-changed", G_CALLBACK(zoom_scale_changed_cb), &app);
     g_signal_connect(zoom, "end", G_CALLBACK(zoom_end_cb), &app);
-    
+
     gtk_widget_show_all (window);
 
     gtk_main();
